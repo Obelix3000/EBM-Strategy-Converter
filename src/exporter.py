@@ -54,3 +54,30 @@ class B99Exporter:
                     content.append(f"ABS {rx:.6f} {ry:.6f}")
                     
         return "\n".join(content) + "\n"
+
+    @staticmethod
+    def generate_b99_single_layer(scan_path: ScanPath, layer_idx: int) -> str:
+        """
+        Generiert den B99-Inhalt für exakt eine Schicht und übernimmt die 
+        globale Schichtnummer (layer_idx). Wird für Einzeldatei-Exporte benötigt.
+        """
+        content = []
+        content.append("# platform dimension=120.0x120.0x200.0 mm")
+        content.append("# vector")
+        content.append("# double")
+        
+        if not scan_path or not scan_path.segments:
+            return ""
+            
+        content.append(f"# figure Grp01_Layer{layer_idx:04d}_Infill")
+        num_points = sum(len(seg) for seg in scan_path.segments)
+        content.append(f"# Generic Infill: Point Index=0  Number Points={num_points}")
+        content.append("data")
+        
+        for segment in scan_path.segments:
+            for x, y in segment:
+                rx = x / 60.0
+                ry = y / 60.0
+                content.append(f"ABS {rx:.6f} {ry:.6f}")
+                
+        return "\n".join(content) + "\n"

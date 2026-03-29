@@ -1,4 +1,6 @@
 import streamlit as st
+import io
+import zipfile
 from src.geometry import GeometryEngine
 from src.parser import B99Parser
 from src.exporter import B99Exporter
@@ -125,38 +127,49 @@ def process_and_display_layers():
     st.markdown("---")
     
     # Massen-Export der B99
-    if st.button("Generate .B99 File (Alle Schichten exportieren)"):
-        all_paths = []
+    if st.button("Generate .B99 Files (Als ZIP-Archiv exportieren)"):
+        # Initialisiere ein virtuelles ZIP-File im Arbeitsspeicher
+        zip_buffer = io.BytesIO()
+        
         # Fortschritts-Spinner einblenden, während der Server rechnet
-        with st.spinner("Berechne Scan-Algorithmen für alle Schichten..."):
-            for l_idx, poly in enumerate(layers):
-                l_rot = (l_idx * params['rotation_angle_deg']) % 360.0
-                layer_path = ScanPath(segments=[])
-                
-                # Hier arbeiten die Algorithmen voll im Batch-Betrieb (bis zu 400 Schichten)
-                if "Contour" in selected_strategies:
-                    layer_path.segments.extend(ContourStrategy().generate_path(
-                        poly, point_spacing=params['point_spacing']).segments)
-                if "Raster" in selected_strategies:
-                    layer_path.segments.extend(RasterStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot).segments)
-                if "Spot Consecutive" in selected_strategies:
-                    layer_path.segments.extend(SpotConsecutiveStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot).segments)
-                if "Spot Ordered" in selected_strategies:
-                    layer_path.segments.extend(SpotOrderedStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, skip_offset=params['spot_pass_skip']).segments)
-                if "Ghost Beam" in selected_strategies:
-                    layer_path.segments.extend(GhostBeamStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], rotation_angle_deg=l_rot, spot_on_time_ms=params['ghost_spot_on'], time_delay_ms=params['ghost_time_delay']).segments)
-                all_paths.append(layer_path)
-                
-            # Konvertierung und String-Aufbau des G-Code bzw. B99 Formates (Scaling/ABS etc)
-            b99_data = B99Exporter.generate_b99_content(all_paths)
+        with st.spinner("Berechne Scan-Algorithmen und verpacke ZIP-Archiv..."):
+            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+                for l_idx, poly in enumerate(layers):
+                    l_rot = (l_idx * params['rotation_angle_deg']) % 360.0
+                    layer_path = ScanPath(segments=[])
+                    
+                    # Hier arbeiten die Algorithmen voll im Batch-Betrieb (bis zu 400 Schichten)
+                    if "Contour" in selected_strategies:
+                        layer_path.segments.extend(ContourStrategy().generate_path(
+                            poly, point_spacing=params['point_spacing']).segments)
+                    if "Raster" in selected_strategies:
+                        layer_path.segments.extend(RasterStrategy().generate_path(
+                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot).segments)
+                    if "Spot Consecutive" in selected_strategies:
+                        layer_path.segments.extend(SpotConsecutiveStrategy().generate_path(
+                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot).segments)
+                    if "Spot Ordered" in selected_strategies:
+                        layer_path.segments.extend(SpotOrderedStrategy().generate_path(
+                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, skip_offset=params['spot_pass_skip']).segments)
+                    if "Ghost Beam" in selected_strategies:
+                        layer_path.segments.extend(GhostBeamStrategy().generate_path(
+                            poly, hatch_spacing=params['hatch_spacing'], rotation_angle_deg=l_rot, spot_on_time_ms=params['ghost_spot_on'], time_delay_ms=params['ghost_time_delay']).segments)
+                    
+                    # Generiere den Code für GENAU DIESEN einen Layer
+                    b99_string = B99Exporter.generate_b99_single_layer(layer_path, l_idx)
+                    
+                    if b99_string:
+                        # Füge die generierte Schicht als einzelne Datei ins Archiv ein
+                        zip_file.writestr(f"Layer_{l_idx:04d}.B99", b99_string)
             
-        st.success("B99 Maschinen-Datei erfolgreich formatiert!")
-        # Der Browser initiiert via Text-Streamlit-Button einen Download
-        st.download_button(label="Download B99 File", data=b99_data, file_name="output_strategy.b99", mime="text/plain")
+        st.success("ZIP-Archiv erfolgreich formatiert!")
+        # Der Browser initiiert via Text-Streamlit-Button einen ZIP Download
+        st.download_button(
+            label="Download ZIP Archiv (.B99 Layer)", 
+            data=zip_buffer.getvalue(), 
+            file_name="Arcam_Maschinen_Toolpaths.zip", 
+            mime="application/zip"
+        )
 
 def generator_mode():
     """
