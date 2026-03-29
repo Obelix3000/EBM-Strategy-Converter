@@ -68,11 +68,20 @@ def process_and_display_layers():
     layers = st.session_state['layers']
     params = st.session_state['strategy_params']
     
+    if len(layers) == 0:
+        st.warning("Warnung: Keine gültigen geometrischen Schichten gefunden!")
+        return
+
     st.markdown("---")
     st.subheader("Echtzeit Layer-Visualisierung (Lazy Loading)")
     
-    # Nutzer wählt Schicht (0 - Max)
-    layer_idx = st.slider("Wählen Sie die Z-Ebene aus", 0, len(layers) - 1, 0)
+    # Nutzer wählt Schicht (0 - Max), falls mehr als 1 Layer existiert.
+    if len(layers) == 1:
+        layer_idx = 0
+        st.info("Diese Datei enthält genau 1 extrahierbare Z-Ebene (Layer).")
+    else:
+        layer_idx = st.slider("Wählen Sie die Z-Ebene aus", 0, len(layers) - 1, 0)
+        
     # Beziehe Shapely Polygon aus Generator/Parser Array
     selected_layer_poly = layers[layer_idx]
     
