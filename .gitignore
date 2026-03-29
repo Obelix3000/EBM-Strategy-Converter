@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Streamlit
+.streamlit/
+.DS_Store
+
+# Data and Outputs
+data/examples/
+data/output/
+*.B99
+*.b99
+*.pdf
+
+# Temporary scripts
+perf_test.py
+extract_pdf.py
