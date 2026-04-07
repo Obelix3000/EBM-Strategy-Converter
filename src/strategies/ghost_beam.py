@@ -17,21 +17,17 @@ class GhostBeamStrategy(BaseScanStrategy):
         rotation_angle_deg = kwargs.get("rotation_angle_deg", 0.0)
         hatch_spacing_um = kwargs.get("hatch_spacing", 200.0)
         
-        # Ghost Beam spezifische Physik-Eingabeparameter aus dem GUI
-        spot_on_time_ms = kwargs.get("spot_on_time_ms", 3.0)  # Brenndauer pro Punkt
-        time_delay_ms = kwargs.get("time_delay_ms", 2.0)      # Verzögerung zwischen P und S
-        beam_velocity_mms = kwargs.get("beam_velocity_mms", 490.0)  # Scangeschwindigkeit der Maschine in mm/s
+        # Globale und spezifische Koordinaten-Parameter
+        point_spacing_um = kwargs.get("point_spacing", 100.0) 
+        skip_spacing_um = kwargs.get("skip_spacing_um", 1000.0)
         
         # Transformation in mm
         hatch_spacing = hatch_spacing_um / 1000.0
-        
-        # Berechnung des räumlichen Abstandes nach [Lee et al., 2018] Ghost Beam-Ansatz
-        # Point Spacing (Abstand zwischen zwei aufeinanderfolgenden Spots derselben Spur)
-        point_spacing = (spot_on_time_ms / 1000.0) * beam_velocity_mms
+        point_spacing = point_spacing_um / 1000.0
         
         # Skip Spacing (Physikalische Konstante: Um wie viele Millimeter der zweite 
-        # Ghost-Strahl absolut hinter dem echten Beam hinterherhinkt).
-        skip_spacing = (time_delay_ms / 1000.0) * beam_velocity_mms
+        # Ghost-Strahl (Sekundärpunkt) absolut hinter dem Primärpunkt auf der Trajektorie hinterherhinkt).
+        skip_spacing = skip_spacing_um / 1000.0
         
         scan_path = ScanPath(segments=[])
         if polygon.is_empty or hatch_spacing <= 0 or point_spacing <= 0:

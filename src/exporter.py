@@ -18,7 +18,7 @@ class B99Exporter:
         """
         content = []
         
-        # Standard Arcam-Header für den Kontext der Anlage (A2X)
+        # Standard Arcam-Header für den Kontext der Anlage (S12 Pro-Beam Retrofit)
         # Enthält die physische Plattformdimension
         content.append("# platform dimension=120.0x120.0x200.0 mm")
         content.append("# vector")

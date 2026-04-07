@@ -31,16 +31,20 @@ def render_strategy_ui():
                                 ["Contour", "Raster", "Spot Consecutive", "Spot Ordered", "Ghost Beam"],
                                 default=["Contour", "Raster"])
                                 
+    with st.expander("ℹ️ Erklärungen zu den Scan-Strategien"):
+        st.markdown('''
+        - **Contour:** Fährt exakt die äußere Randkontur (Perimeter) des Polygons ab. Sorgt für eine glatte Seiten-Oberfläche.
+        - **Raster:** Zieht klassische, durchgehende Schlangenlinien (Hatching) über die Innenfläche. Standard-Infill in der additiven Fertigung.
+        - **Spot Consecutive:** Der Infill wird nicht als Linie gezogen, sondern als Reihe dicht aneinander gereihter, punktförmiger Schmelz-Dots.
+        - **Spot Ordered:** Setzt Punkte, lässt aber bewusst Lücken (z.B. 2 Spots abstand), die erst in einem zweiten Durchlauf gefüllt werden. Verhindert lokale Hitze-Akkumulation sehr effektiv!
+        - **Ghost Beam:** Täuscht eine Strahlteilung vor. Die Maschine springt extrem schnell zwischen einem Primär-Schmelzpunkt und einem nachziehenden Koordinaten-Punkt (Secondary Beam Lag) hin und her, um den thermischen Gradienten zu glätten.
+        ''')
+                                
     # Spezifische Eingabefelder werden dynamisch eingeblendet, falls die zugehörige komplexe Strategie aktiviert ist.
-    ghost_spot_on = 3.0
-    ghost_time_delay = 2.0
+    ghost_skip_spacing_um = 1000.0
     if "Ghost Beam" in strategies:
-        st.markdown("**Ghost Beam (Störungs-Simulation) Parameter**")
-        col_g1, col_g2 = st.columns(2)
-        with col_g1:
-            ghost_spot_on = st.number_input("Spot On Time/Brenndauer (ms)", value=3.0, step=0.1)
-        with col_g2:
-            ghost_time_delay = st.number_input("Sekundär-Strahl Verzögerung (ms)", value=2.0, step=0.1)
+        st.markdown("**Ghost Beam (Split Beam) Parameter**")
+        ghost_skip_spacing_um = st.number_input("Secondary Beam Lag (Abstand des Ghostbeams in µm)", min_value=10.0, value=1000.0, step=100.0)
             
     spot_pass_skip = 2
     if "Spot Ordered" in strategies:
@@ -53,8 +57,7 @@ def render_strategy_ui():
         'hatch_spacing': hatch_spacing,
         'rotation_angle_deg': rotation_angle_deg,
         'strategies': strategies,
-        'ghost_spot_on': ghost_spot_on,
-        'ghost_time_delay': ghost_time_delay,
+        'ghost_skip_spacing_um': ghost_skip_spacing_um,
         'spot_pass_skip': spot_pass_skip
     }
 
@@ -116,12 +119,18 @@ def process_and_display_layers():
             
     if "Ghost Beam" in selected_strategies:
         combined_path.segments.extend(GhostBeamStrategy().generate_path(
-            selected_layer_poly, hatch_spacing=params['hatch_spacing'], 
-            rotation_angle_deg=layer_rotation, spot_on_time_ms=params['ghost_spot_on'],
-            time_delay_ms=params['ghost_time_delay']).segments)
+            selected_layer_poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'],
+            rotation_angle_deg=layer_rotation, skip_spacing_um=params['ghost_skip_spacing_um']).segments)
         
+    st.markdown("#### Visualisierungs-Optionen")
+    c1, c2 = st.columns(2)
+    with c1:
+        color_by_order = st.checkbox("Scan-Reihenfolge farblich markieren (Start -> Ende)", value=True)
+    with c2:
+        show_arrows = st.checkbox("Strahl-Richtungspfeile einblenden (Warnung: langsamer bei vielen Segmenten)", value=False)
+
     # Live-Renderung nur der momentan aktiven Schicht an die Plotly-Library schicken
-    fig = Visualizer.plot_layer(selected_layer_poly, combined_path, layer_index=layer_idx)
+    fig = Visualizer.plot_layer(selected_layer_poly, combined_path, layer_index=layer_idx, color_by_order=color_by_order, show_arrows=show_arrows)
     st.plotly_chart(fig, use_container_width=True)
     
     st.markdown("---")
@@ -153,7 +162,7 @@ def process_and_display_layers():
                             poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, skip_offset=params['spot_pass_skip']).segments)
                     if "Ghost Beam" in selected_strategies:
                         layer_path.segments.extend(GhostBeamStrategy().generate_path(
-                            poly, hatch_spacing=params['hatch_spacing'], rotation_angle_deg=l_rot, spot_on_time_ms=params['ghost_spot_on'], time_delay_ms=params['ghost_time_delay']).segments)
+                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, skip_spacing_um=params['ghost_skip_spacing_um']).segments)
                     
                     # Generiere den Code für GENAU DIESEN einen Layer
                     b99_string = B99Exporter.generate_b99_single_layer(layer_path, l_idx)

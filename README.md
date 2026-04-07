@@ -2,49 +2,67 @@
 
 **Hochschule München (HM) – Studienarbeit im Fachbereich Additive Manufacturing**
 
-Dieses Projekt wurde im Rahmen einer **Studienarbeit** an der **Hochschule München** entwickelt. Das Hauptziel der bereitgestellten Software ist die wissenschaftliche Untersuchung, Anpassung und Optimierung von thermischen Belichtungsstrategien (Scan-Strategien) für den **Arcam A2X** Elektronenstrahlschmelz-Baudrucker (E-PBF: Electron Beam Powder Bed Fusion).
+Dieses Softwareprojekt ermöglicht die Erforschung und Manipulation von Laser- bzw. Elektronenstrahl-Belichtungsstrategien für den additiven **Arcam S12 Pro-Beam Retrofit 3D-Metalldrucker** (E-PBF = Electron Beam Powder Bed Fusion). 
 
-Die Software ist als interaktives Python `Streamlit`-Web-Interface konzipiert und bietet zwei primäre Lösungsansätze:
+Anstatt mühsam manuelle Maschinencodes zu schreiben oder herstellergebundene (proprietäre) Slicer zu verwenden, bietet dieses Programm eine moderne Weboberfläche, in der sich Schmelz-Trajektorien visuell erstellen, analysieren und kombinieren lassen. Die Software generiert dabei rein koordinatenbasierte `.B99`-Daten, welche aus einer simplen Liste von abzufahrenden Wegpunkten (`ABS X Y`) bestehen.
+
+---
+
+## 🚀 Was macht das Programm?
+
+Die App operiert in zwei wählbaren Haupt-Modi:
 
 1. **Parametric Toolpath Generator**  
-   Anstatt sich auf klassisches Slicing von 3D-Geometrien (z.B. STL-Dateien) zu stützen, nutzt der Generator eine parametrische Engine (basierend auf `Shapely`), um einfache Probekörper direkt als Serie von 2.5D-Querschnitten zu berechnen und hochpräzise zu belichten (z.B. für Parameter-Studien).
-
-2. **.B99 Strategy Converter (Parser & Exporter)**  
-   Ermöglicht das Einlesen bestehender Arcam `.B99` Dateien. Das Tool liest die physikalischen Bahnen ein und nutzt komplexe geometrische Hüllkurven-Berechnungen (Convex Hull), um die ursprüngliche Schichtkontur zu rekonstruieren. Diese Konturen können dann mit völlig neuartigen thermischen Belichtungsstrategien (Sub-Passes) gefüllt und abermals als Maschinen-Code exportiert werden.
-
----
-
-## Funktionsumfang der Strategien
-
-Das System verfügt über eine Pipeline, welche das *Composite Design Pattern* implementiert. Das bedeutet, dass pro Schicht auch mehrere der folgenden Strategien direkt übereinander gelegt werden können (Kombinationsstrategien).
-
-- **Raster Infill:** Zeilenweiser Aufbau mit einer definierbaren Rotation (z.B. $67^\circ$) pro Schicht zum Ausgleichen von mechanischen Anisotropien.
-- **Contour Mode:** Mathematisches Abfahren der Außenkanten (zur deutlichen Verbesserung der Oberflächenqualität).
-- **Spot Consecutive:** Wie das klassische Raster-Hatching, jedoch als forcierte physikalische Jump-Matrix konzipiert, welche Spot-Melting abbildet, bei dem der Strahl permanent ein/ausschaltet.
-- **Spot Ordered:** Im Gegensatz zur sequentiellen Abarbeitung überspringt diese Strategie bewusst Positionen (+Offset) innerhalb der Schicht, um die Punkte im nächsten Unter-Durchlauf erst zu füllen. **Forschungs-Kontext**: Dient aktiv der Optimierung lokaler Temperaturgradienten und Erstarrungsraten ($G$ und $R$).
-- **Ghost Beam Tracking:** Simuliert die Hochfrequenz-Strahlteilung von zwei zeitgleich agierenden Belichtungsquellen (einem Primary-Beam und einem sekundären Ghost-Beam). Über die konfigurierbare Strahldauer ($Spot \ On \ Time$) und die zeitliche Verzögerung ($Time \ Delay$) errechnet der Algorithmus den räumlichen Offset (Lagging) des zweiten Beams.
+   Mit diesem Modus kannst du rein künstlich einfache 2.5D Rechteck-Volumina (Probekörper) erzeugen, ohne eine fremde .STL-Datei hochladen zu müssen. Du gibst einfach Länge, Breite, Höhe und die gewünschte Schichtdicke ein, und der Generator baut das Bauteil virtuell Schicht für Schicht auf.
+   
+2. **.B99 Converter (Reverse-Engineering)**  
+   Besitzt du bereits eine alte `.B99` Datei der Arcam-Maschine, kannst du sie hier hochladen. Die Software liest die alten Schmelzlinien ein, hüllt die äußersten Punkte wie ein Gummiband ein (Convex Hull Methode) und ermittelt so die exakte Bauteilform. Anschließend wird die alte Strategie gelöscht und mit deinen neuen Werten völlig überschrieben!
 
 ---
 
-## Installation & Ausführung
+## ⚙️ Wie wird konfiguriert? (UI Parameter)
 
-Stellen Sie sicher, dass Python (3.10+) installiert ist.
+In der linken Seitenleiste lassen sich die physikalischen Parameter des Elektronenstrahls exakt einstellen. Da die `.B99`-Maschinendatei selbst jedoch keinerlei Zeit-, Geschwindigkeits- oder Leistungswerte abspeichert, werden im UI ausschließlich **räumliche Geometriewerte (Abstände)** eingestellt.
 
-1. Installieren der benötigten wissenschaftlichen Bibliotheken:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Starten der Streamlit-Anwendung (öffnet sich automatisch auf `localhost` im Webbrowser):
-   ```bash
-   python -m streamlit run app.py
-   ```
+*   **Punkt-Abstand (µm):** Gibt an, wie weit zwei aufeinanderfolgende Schmelzpunkte auf einer durchgehenden Linie voneinander entfernt liegen. Typischerweise 100 µm.
+*   **Linien-Abstand / Hatch (µm):** Der horizontale Abstand zwischen zwei parallelen Linien (Raupen). Bei dicken Raupen wird dieser höher gewählt (z.B. 200 µm).
+*   **Rotationswinkel pro Schicht (°):** Damit das Bauteil nicht in sich zusammenbricht oder Risse bekommt (mechanische Anisotropie), wird das Infill-Muster nach jeder Schicht gedreht – der Standard liegt bei $67^\circ$.
+*   **Strategie-Auswahl:** Eine Auswahlliste. Du kannst (und solltest) mehrere Strategien übereinanderlegen (z.B. erst eine randglättende `Contour` und direkt darauf ein flächenfüllendes `Raster`).
+*   **Secondary Beam Lag:** (Spezial-Setting für Ghost Beam). Zieht den zweiten Strahl exakt um den spezifizierten µm Abstand hinter dem ersten Strahl her.
+*   **Verpass-Abstand (Skip Offset):** (Spezial-Setting für Spot Ordered). Um wie viele Punkte der Strahl absichtlich weiter springen soll, bevor er den Zwischenraum ausfüllt.
 
-## Technologie-Stack
+---
 
-* **Frontend / UI Layer**: `Streamlit` für schnelle, web-basierte Prototyping-Interfaces.
-* **Geometrie Layer**: `Shapely` für Hüllkurven-Interpolation, Polygon-Mathe und Schnitte.
-* **Math Layer**: C-basierte `NumPy` Listen-Operationen zur Gewährleistung von Performance in großen Punkte-Wolken (bis zu 400 Schichten gleichzeitig).
-* **Render / View Layer**: `Plotly` für das Layer-by-Layer "Lazy Rendering", weshalb die Anwendung nicht bei massiven Punktewolken an RAM-Limits stößt.
+## 🧬 Erklärung der 5 Scan-Strategien
 
-## Danksagung / Kontext
-Das Tool dient im akademischen Raum als Werkzeug zur Visualisierung und Manipulation der zugrundeliegenden `.B99` Schmelzlogik ohne proprietäre Slicer-Nutzung. Erstellt für die Module des Studiengangs rund um **Additive Manufacturing** an der HM.
+Die folgenden Scan-Modi bestimmen, in welcher Aufteilung der Elektronenstrahl die berechneten Schichten (Layer) des Bauteiles abfährt. Jede Strategie hat andere Vor- und Nachteile in Bezug auf Hitze-Stau und Erstarrungszeitpunkt:
+
+1. **Contour (Kontur-Modus):** 
+   Fährt exakt die äußere Linie (den Rahmen) des Polygons ab. Das Prinzip ist ähnlich wie das Nachzeichnen eines Bildes mit einem Filzstift am Rand, bevor man das Innere ausmalt. Sorgt für glatte äußere Flanken am Bauteil.
+
+2. **Raster (Schlangenlinien-Modus):** 
+   Das Standard-Füllmuster (Infill). Der Strahl pflügt in langen, parallelen Linien durch die Fläche und wendet am Ende, um in die Gegenrichtung weiterzulaufen. Das bringt schnell Material ein, aber die langen Linien können extrem viel Hitze lokal anstauen.
+
+3. **Spot Consecutive (Punktuelle Perforation):** 
+   Der Infill wird *nicht* als durchgehende, langgezogene Linie gedruckt. Stattdessen schießt der Strahl eine dichte Perlenkette aus einzelnen Punkten in das Material. Da der Strahl zwischen jedem Punkt winzige Bruchteile von Millisekunden ausgetastet wird (Jump), sinkt die Gefahr großflächiger Materialüberhitzung massiv ab.
+
+4. **Spot Ordered (Geteilter Punkt-Aufbau):** 
+   Eine hochentwickelte Strategie gegen schädliche punktuelle Hitzestaus (Hotspots). Der Strahl schießt einen Punkt, **überspringt absichtlich N Punkte** (z.B. 2) und schießt wieder. Wenn die Reihe fertig ist, springt der Strahl nach vorne zurück und beginnt die "freigelassenen Lücken" zu füllen. Der thermische Gradient wird dadurch großflächig aufgebrochen und Erstarrungsraten ($R$) reguliert sich harmonisch.
+
+5. **Ghost Beam (Strahlteilungs-Simulation):**
+   EBM-Anlagen können Koordinaten derart rasend schnell anvisieren, dass für das menschliche Auge (und das geschmolzene Titanpulver) der Eindruck entsteht, als ob **zwei gebündelte Strahlen gleichzeitig** über das Glas gleiten. Diese Strategie sortiert die Koordinaten so um, dass der Strahl permament zwischen dem vorderen Primärpunkt und einem kurz dahinter liegenden Geisterpunkt ("Secondary Beam") hin- und herzittert. Dies zieht einen beruhigenden Hitzeschweif hinter der Schmelzfront her, der das Metall geschmeidiger erstarren lässt.
+
+---
+
+## 🖥️ Technologie-Stack: Warum nutzen wir das?
+
+Dieses Tool wurde vollständig in Python entwickelt. Die Bibliotheken wurden dabei nach sehr strikten Performance-Metriken (tausende Mikropunkte in hunderten Layern) ausgewählt:
+
+*   **GUI mit `Streamlit`:**  
+    Streamlit ist ein Framework für Daten-Apps. Anstatt Wochen in HTML/CSS und Frontend-Server-Verbindungen zu stecken, liefert Streamlit einen Server, der bei Schieberegler-Änderungen sofort den Python-Prozess neu startet. Das ist perfekt für Ingenieure und Wissenschaftler, um extrem schnell Parameter in Echtzeit zu studieren.
+*   **Mathematik mit `NumPy`:**  
+    Ein Layer im 3D-Druck kann aus 100.000 einzelnen Koordinatenpunkten bestehen. Würde man diese einzeln in regulären Python-For-Schleifen ausrechnen, würde der PC Minuten pro Schicht benötigen. `NumPy` lagert all diese Vektormathematik in maschinen-nahen C-Code aus, was den Algorithmus tausendfach beschleunigt.
+*   **Geometrie mit `Shapely`:**  
+    Echte Schmelztrajektorien müssen die Bauteilränder kennen. `Shapely` ist der Industrie-Standard, um festzustellen: *"Schneidet diese Linie den Rand?"* oder *"Passe das Füllmuster exakt in dieses Rechteck ein und schneide es ab"*.
+*   **Visualisierung mit `Plotly`:**  
+    Die Darstellung im UI basiert auf Plotly. Normale Charting-Libraries wie `Matplotlib` rendern statische Bilder. Plotly hingegen rendert interaktives Web-GL und SVG. Ein Experte kann in das Modell hineinzoomen, hovern (um Punkt-Indizes auszulesen) und durch das Schmelzbad streifen. Kombiniert mit dem "Lazy-Loading"-Slider (nur eine Schicht wird je berechnet) schützt dies den Arbeitsspeicher des Nutzers vor Abstürzen.

@@ -13,7 +13,7 @@ class GeometryEngine:
         """
         Generiert iterativ eine Liste von 2D-Polygonen.
         Jedes Polygon repräsentiert eine physische Schicht in Z-Richtung, für ein Bauteil  
-        mit dem Ursprung (0,0) (Zentrum der Arcam A2X Bauplatte).
+        mit dem Ursprung (0,0) (Zentrum der Arcam S12 Pro-Beam Bauplatte).
         
         :param width: Würfel-Dimension auf der X-Achse (in mm)
         :param depth: Würfel-Dimension auf der Y-Achse (in mm)
