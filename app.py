@@ -98,29 +98,29 @@ def process_and_display_layers():
     
     # Composite-Abhandlung: Wendet alle in Multiselect gewählten Strategien nacheinander an
     if "Contour" in selected_strategies:
-        combined_path.segments.extend(ContourStrategy().generate_path(
-            selected_layer_poly, point_spacing=params['point_spacing']).segments)
+        combined_path.extend_path(ContourStrategy().generate_path(
+            selected_layer_poly, point_spacing=params['point_spacing']))
             
     if "Raster" in selected_strategies:
-        combined_path.segments.extend(RasterStrategy().generate_path(
+        combined_path.extend_path(RasterStrategy().generate_path(
             selected_layer_poly, hatch_spacing=params['hatch_spacing'], 
-            point_spacing=params['point_spacing'], rotation_angle_deg=layer_rotation).segments)
+            point_spacing=params['point_spacing'], rotation_angle_deg=layer_rotation))
             
     if "Spot Consecutive" in selected_strategies:
-        combined_path.segments.extend(SpotConsecutiveStrategy().generate_path(
+        combined_path.extend_path(SpotConsecutiveStrategy().generate_path(
             selected_layer_poly, hatch_spacing=params['hatch_spacing'], 
-            point_spacing=params['point_spacing'], rotation_angle_deg=layer_rotation).segments)
+            point_spacing=params['point_spacing'], rotation_angle_deg=layer_rotation))
             
     if "Spot Ordered" in selected_strategies:
-        combined_path.segments.extend(SpotOrderedStrategy().generate_path(
+        combined_path.extend_path(SpotOrderedStrategy().generate_path(
             selected_layer_poly, hatch_spacing=params['hatch_spacing'], 
             point_spacing=params['point_spacing'], rotation_angle_deg=layer_rotation,
-            skip_offset=params['spot_pass_skip']).segments)
+            skip_offset=params['spot_pass_skip']))
             
     if "Ghost Beam" in selected_strategies:
-        combined_path.segments.extend(GhostBeamStrategy().generate_path(
+        combined_path.extend_path(GhostBeamStrategy().generate_path(
             selected_layer_poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'],
-            rotation_angle_deg=layer_rotation, skip_spacing_um=params['ghost_skip_spacing_um']).segments)
+            rotation_angle_deg=layer_rotation, skip_spacing_um=params['ghost_skip_spacing_um']))
         
     st.markdown("#### Visualisierungs-Optionen")
     c1, c2 = st.columns(2)
@@ -190,9 +190,9 @@ def generator_mode():
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Basis Geometrie-Parameter")
-        width = st.number_input("Breite X (mm)", min_value=1.0, value=20.0)
-        depth = st.number_input("Tiefe Y (mm)", min_value=1.0, value=20.0)
-        height = st.number_input("Z-Höhe max (mm)", min_value=1.0, value=20.0)
+        width = st.number_input("Breite X (mm)", min_value=1.0, value=10.0)
+        depth = st.number_input("Tiefe Y (mm)", min_value=1.0, value=10.0)
+        height = st.number_input("Z-Höhe max (mm)", min_value=1.0, value=10.0)
         layer_thickness_um = st.number_input("Feinheit (Layer-Thickness in µm)", min_value=10.0, value=50.0, step=10.0)
         
     with col2:

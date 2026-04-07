@@ -14,13 +14,24 @@ class ScanPath:
     führt auf der Arcam-Maschine implizit zu einem 'Beam-Off' Sprung (Jump).
     """
     segments: List[List[Tuple[float, float]]]
+    segment_types: List[str] = None
     
-    def add_segment(self, segment: List[Tuple[float, float]]):
+    def __post_init__(self):
+        if self.segment_types is None:
+            self.segment_types = ["primary"] * len(self.segments)
+            
+    def add_segment(self, segment: List[Tuple[float, float]], segment_type: str = "primary"):
         """
         Fügt ein neues zusammenhängendes Belichtungs-Segment zum Pfad hinzu.
         """
         if segment:
             self.segments.append(segment)
+            self.segment_types.append(segment_type)
+            
+    def extend_path(self, other_path: 'ScanPath'):
+        """Erweitert diesen Vektor-Pfad sicher um die Segmente und Meta-Typen eines anderen."""
+        self.segments.extend(other_path.segments)
+        self.segment_types.extend(other_path.segment_types)
 
 class BaseScanStrategy:
     """

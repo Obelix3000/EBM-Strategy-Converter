@@ -50,12 +50,26 @@ class Visualizer:
                 xs = [pt[0] for pt in segment]
                 ys = [pt[1] for pt in segment]
                 
+                seg_type = scan_path.segment_types[j] if hasattr(scan_path, 'segment_types') and scan_path.segment_types else "primary"
+                
                 # Standardfarben
                 marker_color = 'rgba(0,0,255,0.7)'
                 line_color = 'rgba(0,0,255,0.4)'
                 arrow_color = 'red'
                 
-                if color_by_order and total_points > 0:
+                if seg_type == "ghost":
+                    # Wenn es ein Ghost-Spot ist, knallrot markieren!
+                    marker_color = 'rgba(255, 0, 0, 1.0)'
+                    line_color = 'rgba(255, 0, 0, 0.5)'
+                    arrow_color = 'red'
+                    
+                    # WICHTIGER GRAFIK-FIX: Da der Ghost-Strahl zeitlich später über exakt dieselben 
+                    # physischen Koordinaten wandert, verdeckt Plotly die Primär-Punkte vollständig (Okklusion).
+                    # Damit du beide Strahlen (Streifenmuster) sehen kannst, verschieben wir den Ghostbeam 
+                    # rein für die Web-Vorschau um winzige 20 µm auf der Y-Achse nach oben!
+                    ys = [y + 0.02 for y in ys]
+                    
+                elif color_by_order and total_points > 0:
                     # Statt Segment-basiert, weisen wir JEDEM Pünktchen individuell eine Farbe 
                     # basierend auf seiner Position in der GEAMTEN zeitlichen Druckreihenfolge zu!
                     vals = [(global_pt_idx + i) / total_points for i in range(len(segment))]

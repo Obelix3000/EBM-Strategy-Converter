@@ -95,11 +95,11 @@ class GhostBeamStrategy(BaseScanStrategy):
                     s_d = d + skip_spacing # Da d von Groß nach Klein wandert, ist Zuwachs gleichzusetzen mit Lag
                     if s_d <= length:
                         s_pt = orig_line.interpolate(s_d)
-                        scan_path.add_segment([(s_pt.x, s_pt.y)])
+                        scan_path.add_segment([(s_pt.x, s_pt.y)], segment_type="ghost")
                 else:
                     s_d = d - skip_spacing
                     if s_d >= 0:
                         s_pt = orig_line.interpolate(s_d)
-                        scan_path.add_segment([(s_pt.x, s_pt.y)])
+                        scan_path.add_segment([(s_pt.x, s_pt.y)], segment_type="ghost")
                 
         return scan_path
