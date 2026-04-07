@@ -129,9 +129,8 @@ def process_and_display_layers():
     with c2:
         show_arrows = st.checkbox("Strahl-Richtungspfeile einblenden (Warnung: langsamer bei vielen Segmenten)", value=False)
 
-    # Live-Renderung nur der momentan aktiven Schicht an die Plotly-Library schicken
     fig = Visualizer.plot_layer(selected_layer_poly, combined_path, layer_index=layer_idx, color_by_order=color_by_order, show_arrows=show_arrows)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, on_select="ignore")
     
     st.markdown("---")
     

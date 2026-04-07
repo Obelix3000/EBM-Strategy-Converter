@@ -82,13 +82,15 @@ class GhostBeamStrategy(BaseScanStrategy):
                 # gespiegelt werden, weil der Primärstrahl jetzt am hinteren Koordinaten-Ende startet.
                 distances = length - distances
                 
-            # Temporale Wechsel-Simulation (Zeitmultiplexing auf Millisekunden-Ebene)
+            # Temporale Wechsel-Simulation (Raumbereichs-Multiplexing)
             for d in distances:
-                # 1. Zuerst feuert der P-Strahl (Primär)
+                # 1. Zuerst feuert der P-Strahl (Primär) als eigenes Beam-Segment
                 p_pt = orig_line.interpolate(d)
                 scan_path.add_segment([(p_pt.x, p_pt.y)])
                 
-                # 2. Direkt danach feuert der sekundäre (Ghost/verzögerte) Strahl
+                # 2. Danach springt (Jumps) der Strahl extrem weit zurück für den Ghost/Sekundär-Punkt
+                # Damit Plotly diese Off-Beam-Jumps nicht als krasse diagonale ZickZack-Linie malt,
+                # werden sie als separate, strikt unverbundene Segmente deklariert! Das verhindert auch Fehldarstellungen von Pfeilen.
                 if flip_line:
                     s_d = d + skip_spacing # Da d von Groß nach Klein wandert, ist Zuwachs gleichzusetzen mit Lag
                     if s_d <= length:
@@ -96,9 +98,8 @@ class GhostBeamStrategy(BaseScanStrategy):
                         scan_path.add_segment([(s_pt.x, s_pt.y)])
                 else:
                     s_d = d - skip_spacing
-                    # Der Ghost Beam wird nur generiert, wenn er nicht schon "aus dem Material gefallen" ist (kleiner 0)
                     if s_d >= 0:
                         s_pt = orig_line.interpolate(s_d)
                         scan_path.add_segment([(s_pt.x, s_pt.y)])
-            
+                
         return scan_path

@@ -40,7 +40,10 @@ class Visualizer:
         # 2. Hinzufügen der Strategie-Scan-Pfade (Raster, Spots, etc)
         if scan_path is not None:
             num_segments = len(scan_path.segments)
+            total_points = sum(len(seg) for seg in scan_path.segments)
             from plotly.colors import sample_colorscale
+            
+            global_pt_idx = 0
             
             # Für jedes separate physikalische Jump-Segment im ScanPath:
             for j, segment in enumerate(scan_path.segments):
@@ -52,14 +55,19 @@ class Visualizer:
                 line_color = 'rgba(0,0,255,0.4)'
                 arrow_color = 'red'
                 
-                if color_by_order and num_segments > 0:
-                    val = j / num_segments if num_segments > 1 else 0
-                    c = sample_colorscale('Viridis', [val])[0]
-                    # Passe Transparenz für Linien leicht an
-                    c_line = c.replace('rgb', 'rgba').replace(')', ', 0.6)') if 'rgb(' in c else c
-                    marker_color = c
-                    line_color = c_line
+                if color_by_order and total_points > 0:
+                    # Statt Segment-basiert, weisen wir JEDEM Pünktchen individuell eine Farbe 
+                    # basierend auf seiner Position in der GEAMTEN zeitlichen Druckreihenfolge zu!
+                    vals = [(global_pt_idx + i) / total_points for i in range(len(segment))]
+                    marker_color = sample_colorscale('Viridis', vals)
+                    
+                    # Die Verbindungs-Linie kriegt die mittlere Farbe des Linien-Abschnitts
+                    val_seg = (global_pt_idx + len(segment)/2) / total_points
+                    c = sample_colorscale('Viridis', [val_seg])[0]
+                    line_color = c.replace('rgb', 'rgba').replace(')', ', 0.4)') if 'rgb(' in c else c
                     arrow_color = c
+                
+                global_pt_idx += len(segment)
                 
                 # Modus 'lines+markers' visualisiert sowohl die verbundene Beam-Bahn als auch die eigentlichen diskreten Aufpunkte
                 fig.add_trace(go.Scatter(x=xs, y=ys,
@@ -68,27 +76,29 @@ class Visualizer:
                                          marker=dict(size=4, color=marker_color),
                                          line=dict(color=line_color, width=1)))
                                          
-                # Richtungspfeile einblenden (in der Mitte jedes Segments)
+                # Richtungspfeile einblenden (auf komplexen Linien mehrmals)
                 if show_arrows and len(segment) >= 2:
-                    mid_idx = max(1, len(segment) // 2)
-                    x_start = segment[mid_idx - 1][0]
-                    y_start = segment[mid_idx - 1][1]
-                    x_end = segment[mid_idx][0]
-                    y_end = segment[mid_idx][1]
-                    
-                    # Pfeil nur zeichnen, wenn Punkte nicht identisch sind
-                    if (x_end - x_start)**2 + (y_end - y_start)**2 > 1e-6:
-                        fig.add_annotation(
-                            x=x_end, y=y_end,
-                            ax=x_start, ay=y_start,
-                            xref="x", yref="y",
-                            axref="x", ayref="y",
-                            showarrow=True,
-                            arrowhead=2,
-                            arrowsize=1.5,
-                            arrowwidth=1.5,
-                            arrowcolor=arrow_color
-                        )
+                    # Pfeile an mehreren Intervallen platzieren, max. alle N Punkte, damit man GhostBeam-Jumps sieht
+                    step = max(2, len(segment) // 6)
+                    for mid_idx in range(1, len(segment), step):
+                        x_start = segment[mid_idx - 1][0]
+                        y_start = segment[mid_idx - 1][1]
+                        x_end = segment[mid_idx][0]
+                        y_end = segment[mid_idx][1]
+                        
+                        # Pfeil nur zeichnen, wenn Punkte räumlich nicht identisch sind
+                        if (x_end - x_start)**2 + (y_end - y_start)**2 > 1e-6:
+                            fig.add_annotation(
+                                x=x_end, y=y_end,
+                                ax=x_start, ay=y_start,
+                                xref="x", yref="y",
+                                axref="x", ayref="y",
+                                showarrow=True,
+                                arrowhead=2,
+                                arrowsize=1.5,
+                                arrowwidth=1.5,
+                                arrowcolor=arrow_color
+                            )
 
         # 3. Layout konfigurieren, Metrisches Gitternetz anzeigen
         fig.update_layout(title=f"Layer {layer_index} Toolpath",

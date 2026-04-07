@@ -90,9 +90,8 @@ class SpotOrderedStrategy(BaseScanStrategy):
                 # und fügen mit dem Modulo-Operator nur jeden x-ten Punkt im aktuellen Sub-Pass an
                 sub_pass_points = [points_list[i] for i in range(len(points_list)) if i % passes == p]
                 
-                # Exakt wie bei der 'Spot Consecutive'-Strategie:
-                # Jeder noch verbliebene Zwischen-Punkt muss als einzelner Jump deklariert werden!
-                for pt in sub_pass_points:
-                    scan_path.add_segment([pt])
+                # Zusammenfassen zu einem Linien-Segment für physikalische Weg-Visualisierung (Arrows) in Plotly
+                if sub_pass_points:
+                    scan_path.add_segment(sub_pass_points)
                     
         return scan_path

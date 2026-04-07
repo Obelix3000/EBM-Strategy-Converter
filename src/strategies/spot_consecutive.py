@@ -88,11 +88,10 @@ class SpotConsecutiveStrategy(BaseScanStrategy):
             if flip_line:
                 points_list.reverse()
                 
-            # WICHTIGSTE ÄNDERUNG ZU RASTER:
-            # Jeder Spot ist hier ein eigenes, exklusives Segment Array (1-Point-Segment)!
-            # Der B99_Exporter iteriert später über Segmente. Da Spot A = Segment A und Spot B = Segment B
-            # führt der Übergang zwischen SegmentA und SegmentB in der Maschine zu einem "Jump" / Reposition.
-            for pt in points_list:
-                scan_path.add_segment([pt])
+            # Alle Punkte dieser Linie/Spotreihe als ein Segment hinzufügen
+            # Das ändert nichts am B99 Output (da dieser nur ABS Punkte iteriert),
+            # sorgt aber dafür, dass UI-Pfeile gezeichnet werden können und Linien logisch zusammenhängen.
+            if points_list:
+                scan_path.add_segment(points_list)
             
         return scan_path
