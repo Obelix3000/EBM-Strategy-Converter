@@ -60,13 +60,10 @@ class GhostBeamStrategy(BaseScanStrategy):
                     if sub_line.geom_type == 'LineString':
                         lines.append((i, sub_line))
         
-        flip_line = False
-        last_y_idx = -1
+        lines.sort(key=lambda item: (item[0], item[1].bounds[0]))
         
-        for idx, line in lines:
-            if idx != last_y_idx and last_y_idx != -1:
-                flip_line = not flip_line
-            last_y_idx = idx
+        for i, (idx, line) in enumerate(lines):
+            flip_line = (i % 2 == 1)
             
             orig_line = rotate(line, rotation_angle_deg, origin=polygon.centroid, use_radians=False)
             length = orig_line.length

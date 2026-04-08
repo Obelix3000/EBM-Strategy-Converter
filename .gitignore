@@ -25,3 +25,4 @@ data/output/
 perf_test.py
 extract_pdf.py
 _temp_pdf.txt
+update.md

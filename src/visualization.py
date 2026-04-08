@@ -4,7 +4,7 @@ from src.strategies.base_strategy import ScanPath
 
 class Visualizer:
     @staticmethod
-    def plot_layer(polygon: Polygon, scan_path: ScanPath, layer_index: int = 0, color_by_order: bool = True, show_arrows: bool = False):
+    def plot_layer(polygon: Polygon, scan_path: ScanPath, layer_index: int = 0, color_by_order: bool = True, show_arrows: bool = False, show_heatmap: bool = False, material_name: str = None, t_point_us: float = 13.0):
         """
         Plottet eine 2.5D Einzel-Schicht samt ihrer Grenzgeometrie (Boundary Polygon) 
         und den generierten Scan-Pfaden (Toolpaths) als interagierbare Plotly-Figure.
@@ -45,6 +45,18 @@ class Visualizer:
             
             global_pt_idx = 0
             
+            heat_values = []
+            if show_heatmap and material_name:
+                import numpy as np
+                from src.thermal import compute_heat_accumulation
+                all_points = []
+                for seg in scan_path.segments:
+                    all_points.extend(seg)
+                if len(all_points) > 0:
+                    heat_array = compute_heat_accumulation(np.array(all_points), material_name, t_point_us=t_point_us)
+                    heat_values = heat_array.tolist()
+
+            
             # Für jedes separate physikalische Jump-Segment im ScanPath:
             for j, segment in enumerate(scan_path.segments):
                 xs = [pt[0] for pt in segment]
@@ -57,37 +69,43 @@ class Visualizer:
                 line_color = 'rgba(0,0,255,0.4)'
                 arrow_color = 'red'
                 
-                if seg_type == "ghost":
-                    # Wenn es ein Ghost-Spot ist, knallrot markieren!
-                    marker_color = 'rgba(255, 0, 0, 1.0)'
-                    line_color = 'rgba(255, 0, 0, 0.5)'
-                    arrow_color = 'red'
-                    
-                    # WICHTIGER GRAFIK-FIX: Da der Ghost-Strahl zeitlich später über exakt dieselben 
-                    # physischen Koordinaten wandert, verdeckt Plotly die Primär-Punkte vollständig (Okklusion).
-                    # Damit du beide Strahlen (Streifenmuster) sehen kannst, verschieben wir den Ghostbeam 
-                    # rein für die Web-Vorschau um winzige 20 µm auf der Y-Achse nach oben!
-                    ys = [y + 0.02 for y in ys]
-                    
-                elif color_by_order and total_points > 0:
-                    # Statt Segment-basiert, weisen wir JEDEM Pünktchen individuell eine Farbe 
-                    # basierend auf seiner Position in der GEAMTEN zeitlichen Druckreihenfolge zu!
-                    vals = [(global_pt_idx + i) / total_points for i in range(len(segment))]
-                    marker_color = sample_colorscale('Viridis', vals)
-                    
-                    # Die Verbindungs-Linie kriegt die mittlere Farbe des Linien-Abschnitts
-                    val_seg = (global_pt_idx + len(segment)/2) / total_points
-                    c = sample_colorscale('Viridis', [val_seg])[0]
+                trace_mode = 'lines+markers'
+                marker_symbol = 'circle'
+                marker_size = 4
+                
+                if show_heatmap and heat_values:
+                    segment_heat = [heat_values[global_pt_idx + i] for i in range(len(segment))]
+                    marker_color = sample_colorscale('RdYlBu_r', segment_heat)
+                    val_seg = sum(segment_heat) / len(segment_heat) if segment_heat else 0
+                    c = sample_colorscale('RdYlBu_r', [val_seg])[0]
                     line_color = c.replace('rgb', 'rgba').replace(')', ', 0.4)') if 'rgb(' in c else c
                     arrow_color = c
-                
+                    if seg_type == "ghost":
+                        marker_symbol = 'x'
+                        marker_size = 6
+                        trace_mode = 'markers'
+                else:
+                    if seg_type == "ghost":
+                        marker_color = 'rgba(255, 0, 0, 1.0)'
+                        line_color = 'rgba(255, 0, 0, 0.5)'
+                        arrow_color = 'red'
+                        marker_symbol = 'x'
+                        marker_size = 6
+                        trace_mode = 'markers'
+                    elif color_by_order and total_points > 0:
+                        vals = [(global_pt_idx + i) / total_points for i in range(len(segment))]
+                        marker_color = sample_colorscale('Viridis', vals)
+                        val_seg = (global_pt_idx + len(segment)/2) / total_points
+                        c = sample_colorscale('Viridis', [val_seg])[0]
+                        line_color = c.replace('rgb', 'rgba').replace(')', ', 0.4)') if 'rgb(' in c else c
+                        arrow_color = c
+
                 global_pt_idx += len(segment)
                 
-                # Modus 'lines+markers' visualisiert sowohl die verbundene Beam-Bahn als auch die eigentlichen diskreten Aufpunkte
                 fig.add_trace(go.Scatter(x=xs, y=ys,
-                                         mode='lines+markers',
+                                         mode=trace_mode,
                                          name=f'Segment {j}',
-                                         marker=dict(size=4, color=marker_color),
+                                         marker=dict(symbol=marker_symbol, size=marker_size, color=marker_color),
                                          line=dict(color=line_color, width=1)))
                                          
                 # Richtungspfeile einblenden (auf komplexen Linien mehrmals)
