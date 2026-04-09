@@ -1,11 +1,10 @@
 import numpy as np
 import plotly.graph_objects as go
 from shapely.geometry import Polygon
-from src.strategies.base_strategy import ScanPath
 
 class Visualizer:
     @staticmethod
-    def plot_layer(polygon: Polygon, scan_path: ScanPath, layer_index: int = 0, color_by_order: bool = True, show_arrows: bool = False, show_heatmap: bool = False, material_name: str = None, t_point_us: float = 13.0):
+    def plot_layer(polygon: Polygon, scan_path, layer_index: int = 0, color_by_order: bool = True, show_arrows: bool = False, show_heatmap: bool = False, material_name: str = None, t_point_us: float = 13.0):
         """
         Plottet eine 2.5D Einzel-Schicht samt ihrer Grenzgeometrie (Boundary Polygon) 
         und den generierten Scan-Pfaden (Toolpaths) als interagierbare Plotly-Figure.

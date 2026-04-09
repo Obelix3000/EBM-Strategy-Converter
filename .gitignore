@@ -1,33 +1,30 @@
-# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized files
 __pycache__/
 *.py[cod]
 *$py.class
 
 # Virtual environments
+.venv/
 venv/
 env/
 ENV/
-env.bak/
-venv.bak/
 
 # Streamlit
 .streamlit/
 .DS_Store
 
-# Data and Outputs
-data/examples/
-data/output/
+# B99-Ausgabedateien und temporäre Daten
 *.B99
 *.b99
 *.pdf
+*.zip
 
-# Temporary scripts
-perf_test.py
-extract_pdf.py
-_temp_pdf.txt
+# Ausgabe-Ordner der App
+EBM_Output/
+data/
+
+# Planungsdokumente (intern)
 update.md
 implemetierungsplan.md
-claude.md
-test.md
-20260408_5Cubes_67_Rotation.zip
-20260408_5Cubes_0_Rotation.zip
+literature_sources.md
+src/test.md

@@ -1,68 +1,113 @@
-# EBM Strategy Converter & Parametric Toolpath Generator
+# EBM Strategy Converter
 
 **Hochschule München (HM) – Studienarbeit im Fachbereich Additive Manufacturing**
 
-Dieses Softwareprojekt ermöglicht die Erforschung und Manipulation von Laser- bzw. Elektronenstrahl-Belichtungsstrategien für den additiven **Arcam S12 Pro-Beam Retrofit 3D-Metalldrucker** (E-PBF = Electron Beam Powder Bed Fusion). 
-
-Anstatt mühsam manuelle Maschinencodes zu schreiben oder herstellergebundene (proprietäre) Slicer zu verwenden, bietet dieses Programm eine moderne Weboberfläche, in der sich Schmelz-Trajektorien visuell erstellen, analysieren und kombinieren lassen. Die Software generiert dabei rein koordinatenbasierte `.B99`-Daten, welche aus einer simplen Liste von abzufahrenden Wegpunkten (`ABS X Y`) bestehen.
+Werkzeug zur Neuanordnung von Elektronenstrahl-Belichtungsstrategien für den **Arcam S12 Pro-Beam Retrofit** (E-PBF). Die Software liest Baujob-ZIP-Archive ein, identifiziert Infill-Schichten, sortiert deren Schmelzpunkte nach einer frei konfigurierbaren Zwei-Stufen-Strategie neu und exportiert ein druckfertiges ZIP – ohne dabei eine einzige Koordinate zu verändern.
 
 ---
 
-## 🚀 Was macht das Programm?
+## Installation
 
-Die App operiert in zwei wählbaren Haupt-Modi:
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
 
-1. **Parametric Toolpath Generator**  
-   Mit diesem Modus kannst du rein künstlich einfache 2.5D Rechteck-Volumina (Probekörper) erzeugen, ohne eine fremde .STL-Datei hochladen zu müssen. Du gibst einfach Länge, Breite, Höhe und die gewünschte Schichtdicke ein, und der Generator baut das Bauteil virtuell Schicht für Schicht auf.
-   
-2. **.B99 Converter (Reverse-Engineering)**  
-   Besitzt du bereits eine alte `.B99` Datei der Arcam-Maschine, kannst du sie hier hochladen. Die Software liest die alten Schmelzlinien ein, hüllt die äußersten Punkte wie ein Gummiband ein (Convex Hull Methode) und ermittelt so die exakte Bauteilform. Anschließend wird die alte Strategie gelöscht und mit deinen neuen Werten völlig überschrieben!
-
----
-
-## ⚙️ Wie wird konfiguriert? (UI Parameter)
-
-In der linken Seitenleiste lassen sich die physikalischen Parameter des Elektronenstrahls exakt einstellen. Da die `.B99`-Maschinendatei selbst jedoch keinerlei Zeit-, Geschwindigkeits- oder Leistungswerte abspeichert, werden im UI ausschließlich **räumliche Geometriewerte (Abstände)** eingestellt.
-
-*   **Punkt-Abstand (µm):** Gibt an, wie weit zwei aufeinanderfolgende Schmelzpunkte auf einer durchgehenden Linie voneinander entfernt liegen. Typischerweise 100 µm.
-*   **Linien-Abstand / Hatch (µm):** Der horizontale Abstand zwischen zwei parallelen Linien (Raupen). Bei dicken Raupen wird dieser höher gewählt (z.B. 200 µm).
-*   **Rotationswinkel pro Schicht (°):** Damit das Bauteil nicht in sich zusammenbricht oder Risse bekommt (mechanische Anisotropie), wird das Infill-Muster nach jeder Schicht gedreht – der Standard liegt bei $67^\circ$.
-*   **Strategie-Auswahl:** Eine Auswahlliste. Du kannst (und solltest) mehrere Strategien übereinanderlegen (z.B. erst eine randglättende `Contour` und direkt darauf ein flächenfüllendes `Raster`).
-*   **Secondary Beam Lag:** (Spezial-Setting für Ghost Beam). Zieht den zweiten Strahl exakt um den spezifizierten µm Abstand hinter dem ersten Strahl her.
-*   **Verpass-Abstand (Skip Offset):** (Spezial-Setting für Spot Ordered). Um wie viele Punkte der Strahl absichtlich weiter springen soll, bevor er den Zwischenraum ausfüllt.
+Die App öffnet sich automatisch im Browser unter `http://localhost:8501`.
 
 ---
 
-## 🧬 Erklärung der 5 Scan-Strategien
+## Verwendung
 
-Die folgenden Scan-Modi bestimmen, in welcher Aufteilung der Elektronenstrahl die berechneten Schichten (Layer) des Bauteiles abfährt. Jede Strategie hat andere Vor- und Nachteile in Bezug auf Hitze-Stau und Erstarrungszeitpunkt:
+### 1. ZIP-Archiv hochladen
 
-1. **Contour (Kontur-Modus):** 
-   Fährt exakt die äußere Linie (den Rahmen) des Polygons ab. Das Prinzip ist ähnlich wie das Nachzeichnen eines Bildes mit einem Filzstift am Rand, bevor man das Innere ausmalt. Sorgt für glatte äußere Flanken am Bauteil.
+Lade ein Baujob-ZIP-Archiv hoch, das einen `Figure Files/`-Ordner mit `.B99`-Dateien enthält (wie von der Arcam-Software exportiert).
 
-2. **Raster (Schlangenlinien-Modus):** 
-   Das Standard-Füllmuster (Infill). Der Strahl pflügt in langen, parallelen Linien durch die Fläche und wendet am Ende, um in die Gegenrichtung weiterzulaufen. Das bringt schnell Material ein, aber die langen Linien können extrem viel Hitze lokal anstauen.
+Die App analysiert die Dateien automatisch und zeigt:
+- Gesamtanzahl der B99-Dateien
+- Anzahl erkannter Infill-Schichten (ab der ersten Schicht mit gerader vorletzter Ziffer im Dateinamen)
+- Anzahl Kontur- und Stützstruktur-Dateien (werden unverändert durchgereicht)
 
-3. **Spot Consecutive (Punktuelle Perforation):** 
-   Der Infill wird *nicht* als durchgehende, langgezogene Linie gedruckt. Stattdessen schießt der Strahl eine dichte Perlenkette aus einzelnen Punkten in das Material. Da der Strahl zwischen jedem Punkt winzige Bruchteile von Millisekunden ausgetastet wird (Jump), sinkt die Gefahr großflächiger Materialüberhitzung massiv ab.
+### 2. Strategie konfigurieren (linke Seitenleiste)
 
-4. **Spot Ordered (Geteilter Punkt-Aufbau):** 
-   Eine hochentwickelte Strategie gegen schädliche punktuelle Hitzestaus (Hotspots). Der Strahl schießt einen Punkt, **überspringt absichtlich N Punkte** (z.B. 2) und schießt wieder. Wenn die Reihe fertig ist, springt der Strahl nach vorne zurück und beginnt die "freigelassenen Lücken" zu füllen. Der thermische Gradient wird dadurch großflächig aufgebrochen und Erstarrungsraten ($R$) reguliert sich harmonisch.
+Die Strategie besteht aus zwei unabhängigen Stufen:
 
-5. **Ghost Beam (Strahlteilungs-Simulation):**
-   EBM-Anlagen können Koordinaten derart rasend schnell anvisieren, dass für das menschliche Auge (und das geschmolzene Titanpulver) der Eindruck entsteht, als ob **zwei gebündelte Strahlen gleichzeitig** über das Glas gleiten. Diese Strategie sortiert die Koordinaten so um, dass der Strahl permament zwischen dem vorderen Primärpunkt und einem kurz dahinter liegenden Geisterpunkt ("Secondary Beam") hin- und herzittert. Dies zieht einen beruhigenden Hitzeschweif hinter der Schmelzfront her, der das Metall geschmeidiger erstarren lässt.
+**Stufe 1 – Segmentierung (Makro)**
+Teilt die Punktwolke einer Schicht in Bereiche auf, bevor die Mikro-Strategie angewendet wird:
+
+| Option | Beschreibung |
+|---|---|
+| Keine Segmentierung | Alle Punkte werden als ein Block behandelt |
+| Schachbrett (Island) | Quadratische Segmente, alternierend Phase A → Phase B |
+| Streifen (Stripe) | Parallele Bänder, senkrecht zur Hatch-Richtung |
+| Hexagonal | Versetztes Waben-Gitter, alternierend Phase A → Phase B |
+| Spiralzonen | Konzentrische Ringe um den Schwerpunkt (außen → innen oder umgekehrt) |
+
+Für alle Segmentierungstypen (außer „Keine") lassen sich **Segmentgröße (mm)** und **Segment-Overlap (µm)** einstellen.
+
+**Stufe 2 – Mikro-Strategie (innerhalb der Segmente)**
+
+| Strategie | Beschreibung |
+|---|---|
+| Raster (Zick-Zack) | Punkte werden zeilenweise in Hatch-Abstand sortiert, jede zweite Zeile umgekehrt |
+| Spot Consecutive | Identisch zu Raster (gleiche Sortierung, diskrete Einzelpunkte) |
+| Spot Ordered | Raster + Multipass: erst jeden (Skip+1)-ten Punkt, dann die Lücken |
+| Ghost Beam | Raster + Interleave: Primärpunkt → nachlaufender Geistpunkt (P1→S1→P2→S2…) |
+| Hilbert-Kurve | Punkte nach Hilbert-Index auf einem 2ⁿ × 2ⁿ Grid sortiert |
+| Spiral | Ringweise nach Abstand zum Schwerpunkt, innerhalb des Rings nach Winkel |
+| Peano-Kurve | Schlangenlinien-Sortierung auf feinem quantisierten Grid (Boustrophedon) |
+
+Gemeinsame Parameter:
+- **Linien-Abstand / Hatch (µm):** Abstand zwischen Hatch-Zeilen (für Raster-Sortierung)
+- **Rotationswinkel pro Schicht (°):** Das Sortiersystem wird pro Schicht gedreht (Standard: 67°)
+
+> **Hinweis:** Der Punktabstand (100 µm) ist fix – er kommt aus dem Slicer und wird nicht verändert.
+
+### 3. Vorschau prüfen
+
+Wähle eine Infill-Datei aus dem Dropdown und betrachte die originale Punktverteilung im interaktiven Plotly-Diagramm. Optional: Wärmeakkumulation als Farbkodierung einblenden (Material und Punkthaltezeit wählbar).
+
+Die Schema-Diagramme (aufklappbar) zeigen eine schematische Darstellung der gewählten Stufe-1- und Stufe-2-Strategie.
+
+### 4. Strategie anwenden und exportieren
+
+Klicke **„Strategie anwenden & neues ZIP erstellen"**. Die App:
+1. Verarbeitet alle erkannten Infill-Schichten (Fortschrittsbalken)
+2. Schreibt jede Infill-Datei mit neu geordneten Punkten zurück (Header unverändert)
+3. Packt alle Dateien (inklusive unveränderter Kontur- und Stützstruktur-Dateien) in ein neues ZIP
+4. Speichert das ZIP im konfigurierten **Ausgabe-Ordner** (Standard: `~/EBM_Output/`)
+5. Bietet einen **Download-Button** für das neue ZIP
 
 ---
 
-## 🖥️ Technologie-Stack: Warum nutzen wir das?
+## Datei-Klassifikation (Arcam-Namenskonvention)
 
-Dieses Tool wurde vollständig in Python entwickelt. Die Bibliotheken wurden dabei nach sehr strikten Performance-Metriken (tausende Mikropunkte in hunderten Layern) ausgewählt:
+Die Software erkennt Infill-Dateien anhand der **vorletzten Ziffer** vor `.B99` im Dateinamen:
 
-*   **GUI mit `Streamlit`:**  
-    Streamlit ist ein Framework für Daten-Apps. Anstatt Wochen in HTML/CSS und Frontend-Server-Verbindungen zu stecken, liefert Streamlit einen Server, der bei Schieberegler-Änderungen sofort den Python-Prozess neu startet. Das ist perfekt für Ingenieure und Wissenschaftler, um extrem schnell Parameter in Echtzeit zu studieren.
-*   **Mathematik mit `NumPy`:**  
-    Ein Layer im 3D-Druck kann aus 100.000 einzelnen Koordinatenpunkten bestehen. Würde man diese einzeln in regulären Python-For-Schleifen ausrechnen, würde der PC Minuten pro Schicht benötigen. `NumPy` lagert all diese Vektormathematik in maschinen-nahen C-Code aus, was den Algorithmus tausendfach beschleunigt.
-*   **Geometrie mit `Shapely`:**  
-    Echte Schmelztrajektorien müssen die Bauteilränder kennen. `Shapely` ist der Industrie-Standard, um festzustellen: *"Schneidet diese Linie den Rand?"* oder *"Passe das Füllmuster exakt in dieses Rechteck ein und schneide es ab"*.
-*   **Visualisierung mit `Plotly`:**  
-    Die Darstellung im UI basiert auf Plotly. Normale Charting-Libraries wie `Matplotlib` rendern statische Bilder. Plotly hingegen rendert interaktives Web-GL und SVG. Ein Experte kann in das Modell hineinzoomen, hovern (um Punkt-Indizes auszulesen) und durch das Schmelzbad streifen. Kombiniert mit dem "Lazy-Loading"-Slider (nur eine Schicht wird je berechnet) schützt dies den Arbeitsspeicher des Nutzers vor Abstürzen.
+| Vorletzte Ziffer | Typ | Behandlung |
+|---|---|---|
+| Gerade (0, 2, 4, 6, 8) | Infill | Punkte werden neu sortiert |
+| 9 | Infill (ab Cutoff-Schicht) | Punkte werden neu sortiert |
+| Ungerade (1, 3, 5, 7) | Kontur | Unverändert durchgereicht |
+| Alle Schichten vor der ersten geraden Ziffer | Stützstruktur | Unverändert durchgereicht |
+
+---
+
+## B99-Format
+
+- Koordinatensystem: Plattform 120 × 120 mm, Ursprung in der Mitte
+- Normierung: `ABS`-Werte in [-1, +1], wobei `x_mm = ABS_wert × 60`
+- Befehlsformat: `ABS <x_rel> <y_rel>` pro Punkt
+- Ausgabe: 17 signifikante Stellen, `\r\n`-Zeilenenden (wie im Original)
+- Zwischen Segmenten: impliziter Beam-off-Jump (kein explizites Kommando nötig)
+
+---
+
+## Technologie-Stack
+
+| Bibliothek | Verwendung |
+|---|---|
+| **Streamlit** | Web-UI, Interaktion, Dateiupload |
+| **NumPy** | Vektorisierte Punkt-Sortierung (tausende Punkte pro Schicht) |
+| **Shapely** | Konvexe Hülle für Segmentierungsalgorithmen |
+| **Plotly** | Interaktive 2D-Visualisierung mit Zoom und Hover |
