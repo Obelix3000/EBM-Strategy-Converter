@@ -1,3 +1,4 @@
+import numpy as np
 import plotly.graph_objects as go
 from shapely.geometry import Polygon
 from src.strategies.base_strategy import ScanPath
@@ -146,4 +147,111 @@ class Visualizer:
         fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
         fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
         
+        return fig
+
+    @staticmethod
+    def plot_layer_coarse(polygon: Polygon, points_mm: np.ndarray, params: dict,
+                          layer_index: int = 0, max_display_points: int = 2000,
+                          show_heatmap: bool = False, material_name: str = None,
+                          t_point_us: float = 13.0) -> go.Figure:
+        """
+        Grobe Visualisierung der reinen Punktwolke (kein ScanPath-Objekt nötig).
+        Beschränkt die Darstellung auf max_display_points Punkte, um Performance
+        auch bei großen Infill-Dateien zu gewährleisten.
+
+        :param polygon:            Shapely-Polygon der Bauteilgrenze.
+        :param points_mm:          np.ndarray (N, 2) – Koordinaten in mm.
+        :param params:             Strategie-Parameter (für Segmentgrenzen).
+        :param layer_index:        Schicht-ID für den Titel.
+        :param max_display_points: Maximale Anzahl anzuzeigender Punkte.
+        :param show_heatmap:       Wärmeakkumulation als Farbkodierung.
+        :param material_name:      Material für Wärmeberechnung.
+        :param t_point_us:         Punkthaltezeit in µs.
+        :return: Plotly Figure.
+        """
+        fig = go.Figure()
+
+        # 1. Bauteilgrenze (orange)
+        if polygon is not None and not polygon.is_empty and polygon.geom_type == 'Polygon':
+            bx, by = polygon.exterior.xy
+            fig.add_trace(go.Scatter(
+                x=list(bx), y=list(by),
+                mode='lines',
+                name='Bauteil-Grenze',
+                line=dict(color='orange', width=2)
+            ))
+
+        N = len(points_mm)
+        if N == 0:
+            fig.update_layout(title=f"Layer {layer_index} – keine Punkte")
+            return fig
+
+        # 2. Punkte ausdünnen
+        step = max(1, N // max_display_points)
+        display_pts = points_mm[::step]
+
+        # 3. Farbe: Wärme oder Scan-Reihenfolge
+        if show_heatmap and material_name:
+            from src.thermal import compute_heat_accumulation
+            from plotly.colors import sample_colorscale
+            heat = compute_heat_accumulation(points_mm, material_name, t_point_us=t_point_us)
+            heat_disp = heat[::step]
+            marker_color = sample_colorscale('RdYlBu_r', heat_disp.tolist())
+            colorbar = dict(title="Wärme", tickvals=[0, 1], ticktext=["kalt", "heiß"])
+        else:
+            colors = np.arange(len(display_pts)) / max(len(display_pts) - 1, 1)
+            marker_color = colors
+            colorbar = dict(title="Scan-Reihenfolge", tickvals=[0, 1], ticktext=["Start", "Ende"])
+
+        fig.add_trace(go.Scatter(
+            x=display_pts[:, 0], y=display_pts[:, 1],
+            mode='markers',
+            name=f'Schmelzpunkte (1 von {step})',
+            marker=dict(
+                size=3,
+                color=marker_color,
+                colorscale='Viridis' if not (show_heatmap and material_name) else 'RdYlBu_r',
+                colorbar=colorbar,
+                showscale=True
+            )
+        ))
+
+        # 4. Richtungspfeile alle ~N/20 Punkte (an den ausgedünnten Punkten)
+        disp_N = len(display_pts)
+        arrow_step = max(1, disp_N // 20)
+        for idx in range(arrow_step, disp_N, arrow_step):
+            x0, y0 = display_pts[idx - 1]
+            x1, y1 = display_pts[idx]
+            if (x1 - x0) ** 2 + (y1 - y0) ** 2 > 1e-6:
+                fig.add_annotation(
+                    x=x1, y=y1, ax=x0, ay=y0,
+                    xref="x", yref="y", axref="x", ayref="y",
+                    showarrow=True, arrowhead=2, arrowsize=1.5,
+                    arrowwidth=1.5, arrowcolor='rgba(100,100,200,0.7)'
+                )
+
+        # 5. Segmentgrenzen einzeichnen
+        seg_type = params.get('segmentation', 'Keine Segmentierung')
+        seg_size = params.get('seg_size', 5.0)
+        if 'Schachbrett' in seg_type or 'Streifen' in seg_type:
+            minx, maxx = points_mm[:, 0].min(), points_mm[:, 0].max()
+            miny, maxy = points_mm[:, 1].min(), points_mm[:, 1].max()
+            for gx in np.arange(minx, maxx, seg_size):
+                fig.add_shape(type='line', x0=gx, x1=gx, y0=miny, y1=maxy,
+                              line=dict(color='rgba(150,150,150,0.4)', width=1, dash='dot'))
+            for gy in np.arange(miny, maxy, seg_size):
+                fig.add_shape(type='line', x0=minx, x1=maxx, y0=gy, y1=gy,
+                              line=dict(color='rgba(150,150,150,0.4)', width=1, dash='dot'))
+
+        fig.update_layout(
+            title=f"Layer {layer_index} – {N} Punkte (zeige jeden {step}.)",
+            xaxis_title="X (mm)",
+            yaxis_title="Y (mm)",
+            xaxis=dict(scaleanchor="y", scaleratio=1),
+            showlegend=False,
+            plot_bgcolor='white',
+            width=800, height=700
+        )
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
         return fig

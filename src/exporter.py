@@ -1,5 +1,6 @@
 import io
 from typing import List
+import numpy as np
 from src.strategies.base_strategy import ScanPath
 
 class B99Exporter:
@@ -79,5 +80,23 @@ class B99Exporter:
                 rx = x / 60.0
                 ry = y / 60.0
                 content.append(f"ABS {rx:.6f} {ry:.6f}")
-                
+
         return "\n".join(content) + "\n"
+
+    @staticmethod
+    def write_reordered_b99(header_lines: List[str], points_mm: np.ndarray) -> str:
+        """
+        Schreibt eine B99-Datei mit dem originalen Header und neu geordneten Punkten.
+        Koordinaten werden mit 17 signifikanten Stellen ausgegeben (wie im Original).
+        Zeilenenden: \\r\\n (Windows-Format wie in Arcam-Referenzdateien).
+
+        :param header_lines: Liste der Original-Header-Zeilen (inkl. 'data'-Zeile).
+        :param points_mm: np.ndarray (N, 2) mit Koordinaten in mm.
+        :return: Fertiger Dateiinhalt als String.
+        """
+        content = list(header_lines)
+        for x_mm, y_mm in points_mm:
+            rx = x_mm / 60.0
+            ry = y_mm / 60.0
+            content.append(f"ABS {rx:.17g} {ry:.17g}")
+        return "\r\n".join(content) + "\r\n"

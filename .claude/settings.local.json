@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(cd /c/Users/borri/\"LRZ Sync+Share\"/\"Additive Fertigung\"/\"EBM-Strategy-Software\")",
+      "Bash(.venv/Scripts/python.exe -c \"import app; print\\(''app.py Import OK''\\)\")"
+    ]
+  }
+}

@@ -1,375 +1,385 @@
-import streamlit as st
-import io
 import os
+import re
 import glob
 import zipfile
+import tempfile
 
-from src.geometry import GeometryEngine
+import numpy as np
+import streamlit as st
+from shapely.geometry import MultiPoint
+
 from src.parser import B99Parser
 from src.exporter import B99Exporter
-from src.strategies.raster import RasterStrategy
-from src.strategies.spot_consecutive import SpotConsecutiveStrategy
-from src.strategies.spot_ordered import SpotOrderedStrategy
-from src.strategies.ghost_beam import GhostBeamStrategy
-from src.strategies.island import IslandStrategy
-from src.strategies.hilbert import HilbertStrategy
-from src.strategies.spiral import SpiralStrategy
+from src.reorder import reorder_points
 from src.visualization import Visualizer
-from src.strategies.base_strategy import ScanPath
 from src.schema_diagrams import SchemaDiagrams
 from src.thermal import MATERIALS
 
-def render_strategy_ui():
+
+# ---------------------------------------------------------------------------
+# Datei-Klassifikation
+# ---------------------------------------------------------------------------
+
+def classify_b99(filename: str) -> str:
     """
-    Rendert die Sidebar-UI-Komponenten für Globale Strategie-Parameter und 
-    die Auswahl der Strategie-Bundles (Composite).
+    Klassifiziert eine B99-Datei anhand der vorletzten Ziffer vor .B99.
+
+    Regeln (aus Arcam-Namenskonvention):
+      - vorletzte Ziffer gerade  → 'infill_even'
+      - vorletzte Ziffer == 9    → 'infill_9'
+      - vorletzte Ziffer ungerade (außer 9) → 'contour'
+      - sonst                    → 'other'
     """
-    st.subheader("Globale Strategie-Parameter")
-    point_spacing = st.number_input("Punkt-Abstand (µm)", min_value=10.0, value=100.0, step=10.0)
-    hatch_spacing = st.number_input("Linien-Abstand (Hatch) (µm)", min_value=10.0, value=200.0, step=10.0)
-    rotation_angle_deg = st.number_input("Rotationswinkel pro Schicht (°)", min_value=0.0, max_value=360.0, value=67.0, step=1.0)
-    
-    st.subheader("Strategie-Auswahl (Layer Composite)")
-    strategies = st.multiselect("Infill-Strategien auswählen (Anwendung in gewählter Reihenfolge):", 
-                                ["Raster", "Spot Consecutive", "Spot Ordered", "Ghost Beam", "Island (Chessboard)", "Hilbert-Kurve", "Spiral"],
-                                default=["Raster"])
-                                
-    with st.expander("ℹ️ Erklärungen zu den Scan-Strategien"):
-        st.markdown('''
-        - **Raster:** Zieht klassische, durchgehende Schlangenlinien (Hatching) über die Innenfläche. Standard-Infill in der additiven Fertigung.
-        - **Spot Consecutive:** Der Infill wird nicht als Linie gezogen, sondern als Reihe dicht aneinander gereihter, punktförmiger Schmelz-Dots.
-        - **Spot Ordered:** Setzt Punkte, lässt aber bewusst Lücken (z.B. 2 Spots abstand), die erst in einem zweiten Durchlauf gefüllt werden. Verhindert lokale Hitze-Akkumulation sehr effektiv!
-        - **Ghost Beam:** Täuscht eine Strahlteilung vor. Die Maschine springt extrem schnell zwischen einem Primär-Schmelzpunkt und einem nachziehenden Koordinaten-Punkt (Secondary Beam Lag) hin und her, um den thermischen Gradienten zu glätten.
-        - **Island (Chessboard):** Teilt die Fläche in quadratische Zonen und füllt sie im Schachbrettmuster (erst schwarze Felder, dann weiße).
-        - **Hilbert-Kurve:** Raumfüllendes fraktales Linienmuster ohne scharfe 180° Wenden, das sehr gleichmäßige thermische Schmelzbäder erzeugt.
-        - **Spiral:** Zieht von außen nach innen (oder umgekehrt) konzentrische Bahnen, um ebenfalls harte Umkehrpunkte zu vermeiden.
-        
-        *(Hinweis: Konturen werden extern vom Doktoranden berechnet und sind hier deaktiviert).*
-        ''')
-                                
-    ghost_skip_spacing_um = 1000.0
-    if "Ghost Beam" in strategies:
-        st.markdown("**Ghost Beam (Split Beam) Parameter**")
-        ghost_skip_spacing_um = st.number_input("Secondary Beam Lag (Abstand des Ghostbeams in µm)", min_value=10.0, value=1000.0, step=100.0)
-            
-    spot_pass_skip = 2
-    if "Spot Ordered" in strategies:
-        st.markdown("**Spot Ordered (Multipass) Parameter**")
-        spot_pass_skip = st.number_input("Skip Offset = Verpass-Abstand (z.B. +2 Spots)", value=2, step=1)
+    name = os.path.splitext(filename)[0]
+    if len(name) < 2:
+        return 'other'
+    second_last = name[-2]
+    if not second_last.isdigit():
+        return 'other'
+    digit = int(second_last)
+    if digit % 2 == 0:
+        return 'infill_even'
+    elif digit == 9:
+        return 'infill_9'
+    return 'contour'
 
-    island_size_mm = 5.0
-    island_overlap_um = 100.0
-    if "Island (Chessboard)" in strategies:
-        st.markdown("**Island (Chessboard) Parameter**")
-        island_size_mm = st.number_input("Islandgröße (mm)", min_value=1.0, value=5.0, step=1.0)
-        island_overlap_um = st.number_input("Island Overlap (µm)", min_value=0.0, value=100.0, step=10.0)
 
-    hilbert_order = 4
-    if "Hilbert-Kurve" in strategies:
-        st.markdown("**Hilbert-Kurve Parameter**")
-        hilbert_order = st.slider("Hilbert Ordnung (Detailgrad, base2)", min_value=2, max_value=7, value=4)
+def extract_layer_number(filename: str) -> int:
+    """Extrahiert die führende Schichtnummer aus dem Dateinamen."""
+    name = os.path.splitext(filename)[0]
+    match = re.match(r'^(\d+)', name)
+    return int(match.group(1)) if match else 0
 
-    spiral_direction = "inward"
-    if "Spiral" in strategies:
-        st.markdown("**Spiral Parameter**")
-        spiral_direction = st.radio("Spiral-Richtung", ["inward", "outward"])
-        
-    return {
-        'point_spacing': point_spacing,
-        'hatch_spacing': hatch_spacing,
-        'rotation_angle_deg': rotation_angle_deg,
-        'strategies': strategies,
-        'ghost_skip_spacing_um': ghost_skip_spacing_um,
-        'spot_pass_skip': spot_pass_skip,
-        'island_size_mm': island_size_mm,
-        'island_overlap_um': island_overlap_um,
-        'hilbert_order': hilbert_order,
-        'spiral_direction': spiral_direction
-    }
 
-def process_and_display_layers():
+def find_infill_cutoff(b99_files: list) -> int:
     """
-    Zentraler Verarbeitungs- und Visualisierungsblock.
-    Nimmt die Polygon-Schichten entgegen, rendert via Lazy-Loading nur die im Slider aktive
-    Z-Ebene (Performanzgrund) und integriert den Massen-Export (.B99).
+    Findet die erste Schichtnummer, in der eine Infill-Datei mit gerader
+    vorletzter Ziffer vorkommt. Alle Schichten davor = Stützstruktur.
     """
-    if 'layers' not in st.session_state:
-        return
-        
-    layers = st.session_state['layers']
-    params = st.session_state['strategy_params']
-    
-    if len(layers) == 0:
-        st.warning("Warnung: Keine gültigen geometrischen Schichten gefunden!")
-        return
+    for f in sorted(b99_files):
+        if classify_b99(os.path.basename(f)) == 'infill_even':
+            return extract_layer_number(os.path.basename(f))
+    return 2 ** 31  # Kein Infill gefunden
 
-    st.markdown("---")
-    st.subheader("Echtzeit Layer-Visualisierung (Lazy Loading)")
-    
-    if len(layers) == 1:
-        layer_idx = 0
-        st.info("Diese Datei enthält genau 1 extrahierbare Z-Ebene (Layer).")
-    else:
-        layer_idx = st.slider("Wählen Sie die Z-Ebene aus", 0, len(layers) - 1, 0)
-        
-    selected_layer_poly = layers[layer_idx]
-    layer_rotation = (layer_idx * params['rotation_angle_deg']) % 360.0
-    
-    combined_path = ScanPath(segments=[])
-    selected_strategies = params['strategies']
-    
-    if "Raster" in selected_strategies:
-        combined_path.extend_path(RasterStrategy().generate_path(
-            selected_layer_poly, hatch_spacing=params['hatch_spacing'], 
-            point_spacing=params['point_spacing'], rotation_angle_deg=layer_rotation))
-            
-    if "Spot Consecutive" in selected_strategies:
-        combined_path.extend_path(SpotConsecutiveStrategy().generate_path(
-            selected_layer_poly, hatch_spacing=params['hatch_spacing'], 
-            point_spacing=params['point_spacing'], rotation_angle_deg=layer_rotation))
-            
-    if "Spot Ordered" in selected_strategies:
-        combined_path.extend_path(SpotOrderedStrategy().generate_path(
-            selected_layer_poly, hatch_spacing=params['hatch_spacing'], 
-            point_spacing=params['point_spacing'], rotation_angle_deg=layer_rotation,
-            skip_offset=params['spot_pass_skip']))
-            
-    if "Ghost Beam" in selected_strategies:
-        combined_path.extend_path(GhostBeamStrategy().generate_path(
-            selected_layer_poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'],
-            rotation_angle_deg=layer_rotation, skip_spacing_um=params['ghost_skip_spacing_um']))
 
-    if "Island (Chessboard)" in selected_strategies:
-        combined_path.extend_path(IslandStrategy().generate_path(
-            selected_layer_poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'],
-            rotation_angle_deg=layer_rotation, island_size_mm=params['island_size_mm'], island_overlap_um=params['island_overlap_um']))
+# ---------------------------------------------------------------------------
+# Strategie-UI (zweistufig)
+# ---------------------------------------------------------------------------
 
-    if "Hilbert-Kurve" in selected_strategies:
-        combined_path.extend_path(HilbertStrategy().generate_path(
-            selected_layer_poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'],
-            rotation_angle_deg=layer_rotation, hilbert_order=params['hilbert_order']))
+def render_strategy_ui() -> dict:
+    """
+    Rendert die Sidebar-UI für das Zwei-Stufen-Modell und gibt ein params-Dict zurück.
+    """
+    st.header("Strategie-Konfiguration")
 
-    if "Spiral" in selected_strategies:
-        combined_path.extend_path(SpiralStrategy().generate_path(
-            selected_layer_poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'],
-            rotation_angle_deg=layer_rotation, spiral_direction=params['spiral_direction']))
-        
-    st.markdown("#### Visualisierungs-Optionen")
-    c1, c2 = st.columns(2)
-    with c1:
-        color_by_order = st.checkbox("Scan-Reihenfolge farblich markieren (Start -> Ende)", value=True)
-    with c2:
-        show_arrows = st.checkbox("Strahl-Richtungspfeile einblenden (Warnung: langsamer)", value=False)
-        
-    show_heatmap = st.checkbox("Wärmeakkumulation anzeigen (materialabhängig)")
-    material_name = None
-    t_point_us = 13.0
-    if show_heatmap:
-        material_name = st.selectbox("Material", list(MATERIALS.keys()), index=0)
-        t_point_us = st.number_input("Punkthaltezeit (µs)", value=13.0, step=1.0)
+    # === STUFE 1: MAKRO-SEGMENTIERUNG ===
+    st.subheader("Stufe 1: Segmentierung")
+    segmentation = st.selectbox(
+        "Fläche aufteilen in:",
+        ["Keine Segmentierung", "Schachbrett (Island)", "Streifen (Stripe)",
+         "Hexagonal", "Spiralzonen (Konzentrisch)"]
+    )
 
-    with st.spinner("Berechne Visualisierung..."):
-        fig = Visualizer.plot_layer(selected_layer_poly, combined_path, layer_index=layer_idx, color_by_order=color_by_order, show_arrows=show_arrows, show_heatmap=show_heatmap, material_name=material_name, t_point_us=t_point_us)
-    st.plotly_chart(fig, on_select="ignore")
-    
-    with st.expander("📐 Schema: Strahlverlauf"):
-        if "Raster" in selected_strategies:
-            st.components.v1.html(SchemaDiagrams.get_raster(), height=220)
-        if "Spot Consecutive" in selected_strategies:
-            st.components.v1.html(SchemaDiagrams.get_spot_consecutive(), height=220)
-        if "Spot Ordered" in selected_strategies:
-            st.components.v1.html(SchemaDiagrams.get_spot_ordered(), height=220)
-        if "Ghost Beam" in selected_strategies:
-            st.components.v1.html(SchemaDiagrams.get_ghost_beam(), height=220)
-        if "Island (Chessboard)" in selected_strategies:
-            st.components.v1.html(SchemaDiagrams.get_island(), height=220)
-        if "Hilbert-Kurve" in selected_strategies:
-            st.components.v1.html(SchemaDiagrams.get_hilbert(), height=220)
-        if "Spiral" in selected_strategies:
-            st.components.v1.html(SchemaDiagrams.get_spiral(), height=220)
-            
-    st.markdown("---")
-    
-    if st.button("Generate .B99 Files (Als ZIP-Archiv exportieren)"):
-        zip_buffer = io.BytesIO()
-        
-        with st.spinner("Berechne Scan-Algorithmen und verpacke ZIP-Archiv..."):
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                for l_idx, poly in enumerate(layers):
-                    l_rot = (l_idx * params['rotation_angle_deg']) % 360.0
-                    layer_path = ScanPath(segments=[])
-                    
-                    if "Raster" in selected_strategies:
-                        layer_path.segments.extend(RasterStrategy().generate_path(
-                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot).segments)
-                    if "Spot Consecutive" in selected_strategies:
-                        layer_path.segments.extend(SpotConsecutiveStrategy().generate_path(
-                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot).segments)
-                    if "Spot Ordered" in selected_strategies:
-                        layer_path.segments.extend(SpotOrderedStrategy().generate_path(
-                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, skip_offset=params['spot_pass_skip']).segments)
-                    if "Ghost Beam" in selected_strategies:
-                        layer_path.segments.extend(GhostBeamStrategy().generate_path(
-                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, skip_spacing_um=params['ghost_skip_spacing_um']).segments)
-                    if "Island (Chessboard)" in selected_strategies:
-                        layer_path.segments.extend(IslandStrategy().generate_path(
-                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, island_size_mm=params['island_size_mm'], island_overlap_um=params['island_overlap_um']).segments)
-                    if "Hilbert-Kurve" in selected_strategies:
-                        layer_path.segments.extend(HilbertStrategy().generate_path(
-                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, hilbert_order=params['hilbert_order']).segments)
-                    if "Spiral" in selected_strategies:
-                        layer_path.segments.extend(SpiralStrategy().generate_path(
-                            poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=l_rot, spiral_direction=params['spiral_direction']).segments)
-                    
-                    b99_string = B99Exporter.generate_b99_single_layer(layer_path, l_idx)
-                    
-                    if b99_string:
-                        zip_file.writestr(f"Layer_{l_idx:04d}.B99", b99_string)
-            
-        st.success("ZIP-Archiv erfolgreich formatiert!")
-        st.download_button(
-            label="Download ZIP Archiv (.B99 Layer)", 
-            data=zip_buffer.getvalue(), 
-            file_name="Arcam_Maschinen_Toolpaths.zip", 
-            mime="application/zip"
+    seg_size = 5.0
+    seg_overlap = 100.0
+    seg_order = "Schachbrett (schwarz→weiß)"
+
+    if segmentation != "Keine Segmentierung":
+        seg_size = st.number_input("Segmentgröße (mm)", min_value=1.0, value=5.0, step=0.5)
+        seg_overlap = st.number_input("Segment-Overlap (µm)", min_value=0.0, value=100.0, step=10.0)
+        seg_order = st.selectbox(
+            "Segment-Reihenfolge:",
+            ["Schachbrett (schwarz→weiß)", "Spirale (außen→innen)",
+             "Spirale (innen→außen)", "Zufällig", "Sequentiell (links→rechts)"]
         )
 
-def generator_mode():
+    # === STUFE 2: MIKRO-STRATEGIE ===
+    st.subheader("Stufe 2: Scan-Strategie (innerhalb der Segmente)")
+    micro_strategy = st.selectbox(
+        "Punkte-Sortierung:",
+        ["Raster (Zick-Zack)", "Spot Consecutive", "Spot Ordered",
+         "Ghost Beam", "Hilbert-Kurve", "Spiral", "Peano-Kurve"]
+    )
+
+    hatch_spacing = st.number_input("Linien-Abstand / Hatch (µm)", min_value=10.0, value=200.0, step=10.0)
+    rotation_angle = st.number_input(
+        "Rotationswinkel pro Schicht (°)", min_value=0.0, max_value=360.0, value=67.0, step=1.0
+    )
+
+    # Strategie-spezifische Parameter
+    ghost_lag = 1000.0
+    spot_skip = 2
+    hilbert_order = 4
+    spiral_dir = "inward"
+
+    if micro_strategy == "Ghost Beam":
+        ghost_lag = st.number_input("Secondary Beam Lag (µm)", min_value=10.0, value=1000.0, step=100.0)
+    if micro_strategy == "Spot Ordered":
+        spot_skip = st.number_input("Skip Offset", value=2, step=1)
+    if micro_strategy in ("Hilbert-Kurve", "Peano-Kurve"):
+        hilbert_order = st.slider("Ordnung (Detailgrad)", 2, 7, 4)
+    if micro_strategy == "Spiral":
+        spiral_dir = st.radio("Richtung", ["inward", "outward"])
+
+    # Punktabstand ist hardcoded (kommt aus dem Slicer, wird nie geändert)
+    # point_spacing = 100.0 µm
+
+    return {
+        'segmentation': segmentation,
+        'seg_size': seg_size,
+        'seg_overlap': seg_overlap,
+        'seg_order': seg_order,
+        'micro_strategy': micro_strategy,
+        'hatch_spacing': hatch_spacing,
+        'rotation_angle_deg': rotation_angle,
+        'ghost_lag': ghost_lag,
+        'spot_skip': spot_skip,
+        'hilbert_order': hilbert_order,
+        'spiral_direction': spiral_dir,
+        'point_spacing': 100.0,  # fix
+    }
+
+
+# ---------------------------------------------------------------------------
+# Verarbeitungslogik
+# ---------------------------------------------------------------------------
+
+def process_single_infill(filepath: str, params: dict, layer_idx: int):
     """
-    UI für den Parametrischen Toolpath Generator.
-    Agiert komplett ohne externe CAD(Slicing)-Files und generiert abstrakte 2.5D Polygone.
+    Liest eine Infill-B99-Datei, ordnet die Punkte neu und überschreibt die Datei.
     """
-    st.header("Parametric Toolpath Generator")
-    st.markdown("Generiere voll parametrische 2.5D Versuchsteile (Toolpaths) ohne STL-Slicing.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Basis Geometrie-Parameter")
-        width = st.number_input("Breite X (mm)", min_value=1.0, value=10.0)
-        depth = st.number_input("Tiefe Y (mm)", min_value=1.0, value=10.0)
-        height = st.number_input("Z-Höhe max (mm)", min_value=1.0, value=10.0)
-        layer_thickness_um = st.number_input("Feinheit (Layer-Thickness in µm)", min_value=10.0, value=50.0, step=10.0)
-        
-    with col2:
-        params = render_strategy_ui()
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        content = f.read()
 
-    if st.button("Geometrie & Toolpath Engine starten"):
-        layers = GeometryEngine.create_cube_layers(width, depth, height, layer_thickness_um)
-        st.success(f"{len(layers)} Z-Schichten erfolgreich abgetastet!")
-        st.session_state['layers'] = layers
-        st.session_state['strategy_params'] = params
+    header_lines, points_mm = B99Parser.extract_points_and_header(content)
 
-    process_and_display_layers()
+    if len(points_mm) == 0:
+        return  # Leere Datei – unverändert lassen
+
+    reordered = reorder_points(points_mm, params, layer_idx)
+    new_content = B99Exporter.write_reordered_b99(header_lines, reordered)
+
+    with open(filepath, 'w', encoding='utf-8', newline='') as f:
+        f.write(new_content)
 
 
-def converter_mode():
-    st.header("B99 Batch-Converter")
-    st.markdown("Lese einen Ordner mit Original-B99-Dateien ein, wende eine "
-                "neue Infill-Strategie an und speichere die Ergebnisse.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        source_dir = st.text_input("Quell-Ordner (Original B99 Dateien)", 
-                                    placeholder="/pfad/zu/originalen/")
-    with col2:
-        target_dir = st.text_input("Ziel-Ordner (Neue Strategien)", 
-                                    placeholder="/pfad/zu/output/")
-    
-    params = render_strategy_ui()
-    
-    if source_dir and os.path.exists(source_dir) and os.path.isdir(source_dir):
-        b99_files = sorted(glob.glob(os.path.join(source_dir, "*.[Bb]99")))
-        st.info(f"{len(b99_files)} B99-Dateien gefunden.")
-        
-        if b99_files:
-            preview_file = st.selectbox("Vorschau-Datei auswählen", 
-                                         [os.path.basename(f) for f in b99_files])
-            
-            if st.button("Vorschau für diese Datei laden"):
-                filepath = os.path.join(source_dir, preview_file)
-                content = open(filepath, 'r', encoding='utf-8').read()
-                layers = B99Parser.parse_to_polygons(content)
-                st.session_state['layers'] = layers
-                st.session_state['strategy_params'] = params
-                
-    if st.button("Batch-Verarbeitung starten"):
-        if not source_dir or not os.path.isdir(source_dir):
-            st.error("Quell-Ordner existiert nicht!")
-            return
-        os.makedirs(target_dir, exist_ok=True)
-        
-        b99_files = sorted(glob.glob(os.path.join(source_dir, "*.[Bb]99")))
-        progress = st.progress(0)
-        errors = []
-        
-        for i, filepath in enumerate(b99_files):
-            try:
-                content = open(filepath, 'r', encoding='utf-8').read()
-                polygons = B99Parser.parse_to_polygons(content)
-                if not polygons:
-                    errors.append(f"{os.path.basename(filepath)}: Keine Geometrie")
-                    continue
-                
-                poly = polygons[0]
-                layer_idx = i
-                rotation = (layer_idx * params['rotation_angle_deg']) % 360.0
-                
-                scan_path = ScanPath(segments=[])
-                selected_strategies = params['strategies']
-                
-                if "Raster" in selected_strategies:
-                    scan_path.extend_path(RasterStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=rotation))
-                if "Spot Consecutive" in selected_strategies:
-                    scan_path.extend_path(SpotConsecutiveStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=rotation))
-                if "Spot Ordered" in selected_strategies:
-                    scan_path.extend_path(SpotOrderedStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=rotation, skip_offset=params['spot_pass_skip']))
-                if "Ghost Beam" in selected_strategies:
-                    scan_path.extend_path(GhostBeamStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=rotation, skip_spacing_um=params['ghost_skip_spacing_um']))
-                if "Island (Chessboard)" in selected_strategies:
-                    scan_path.extend_path(IslandStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=rotation, island_size_mm=params['island_size_mm'], island_overlap_um=params['island_overlap_um']))
-                if "Hilbert-Kurve" in selected_strategies:
-                    scan_path.extend_path(HilbertStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=rotation, hilbert_order=params['hilbert_order']))
-                if "Spiral" in selected_strategies:
-                    scan_path.extend_path(SpiralStrategy().generate_path(
-                        poly, hatch_spacing=params['hatch_spacing'], point_spacing=params['point_spacing'], rotation_angle_deg=rotation, spiral_direction=params['spiral_direction']))
-                
-                b99_out = B99Exporter.generate_b99_single_layer(scan_path, layer_idx)
-                out_path = os.path.join(target_dir, os.path.basename(filepath))
-                with open(out_path, 'w', encoding='utf-8') as f:
-                    f.write(b99_out)
-                    
-            except Exception as e:
-                errors.append(f"{os.path.basename(filepath)}: {str(e)}")
-            
-            progress.progress((i + 1) / len(b99_files))
-        
-        st.success(f"{len(b99_files) - len(errors)} Dateien erfolgreich konvertiert!")
-        if errors:
-            st.warning(f"{len(errors)} Fehler:")
-            for err in errors:
-                st.text(err)
+# ---------------------------------------------------------------------------
+# Visualisierung
+# ---------------------------------------------------------------------------
 
-    if 'layers' in st.session_state:
-        process_and_display_layers()
+def _show_preview(filepath: str, params: dict, layer_idx: int, reordered: bool,
+                  show_heatmap: bool, material_name: str, t_point_us: float):
+    """Liest eine B99 und zeigt einen groben Plot."""
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        content = f.read()
+    _, points_mm = B99Parser.extract_points_and_header(content)
+    if len(points_mm) == 0:
+        st.warning("Keine Punkte in der ausgewählten Datei gefunden.")
+        return
 
+    if reordered:
+        points_mm = reorder_points(points_mm, params, layer_idx)
+
+    polygon = MultiPoint(points_mm).convex_hull
+    fig = Visualizer.plot_layer_coarse(
+        polygon, points_mm, params,
+        layer_index=layer_idx,
+        show_heatmap=show_heatmap,
+        material_name=material_name,
+        t_point_us=t_point_us,
+    )
+    st.plotly_chart(fig, on_select="ignore")
+
+
+# ---------------------------------------------------------------------------
+# Haupt-App
+# ---------------------------------------------------------------------------
 
 def main():
-    st.set_page_config(page_title="HM: EBM Strategy Software", layout="wide")
-    st.title("Electron-Beam Powder Bed Fusion: Toolpath Engine")
-    
-    st.sidebar.header("Menüführung")
-    mode = st.sidebar.radio("Wähle einen Modus", ["Parametric Generator", ".B99 Converter"])
-    
-    if mode == "Parametric Generator":
-        generator_mode()
-    else:
-        converter_mode()
+    st.set_page_config(page_title="EBM Strategy Converter", layout="wide")
+    st.title("EBM Scan-Strategie Converter")
+    st.markdown(
+        "Lädt ein Baujob-ZIP-Archiv, identifiziert Infill-B99-Dateien, "
+        "sortiert deren Punkte nach der gewählten Strategie neu und "
+        "erzeugt ein druckfertiges ZIP."
+    )
+
+    # Sidebar: Strategie-Konfiguration
+    with st.sidebar:
+        params = render_strategy_ui()
+
+        st.markdown("---")
+        st.subheader("Ausgabe")
+        output_dir = st.text_input(
+            "Ausgabe-Ordner für ZIP",
+            value=os.path.join(os.path.expanduser("~"), "EBM_Output")
+        )
+
+    # --- Datei-Upload ---
+    uploaded_zip = st.file_uploader("Baujob ZIP-Archiv hochladen", type=["zip"])
+    if uploaded_zip is None:
+        st.info("Bitte ein ZIP-Archiv mit 'Figure Files/' Ordner hochladen.")
+        return
+
+    # --- ZIP entpacken und analysieren ---
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, "input.zip")
+        with open(zip_path, 'wb') as f:
+            f.write(uploaded_zip.getvalue())
+
+        extract_dir = os.path.join(tmpdir, "extracted")
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(extract_dir)
+
+        # Figure Files Ordner suchen
+        figure_dir = None
+        for root, dirs, files in os.walk(extract_dir):
+            if "Figure Files" in dirs:
+                figure_dir = os.path.join(root, "Figure Files")
+                break
+            if os.path.basename(root) == "Figure Files":
+                figure_dir = root
+                break
+
+        if figure_dir is None:
+            st.error("Kein 'Figure Files' Ordner im ZIP gefunden!")
+            return
+
+        # B99-Dateien finden
+        b99_files = sorted(glob.glob(os.path.join(figure_dir, "*.[Bb]99")))
+        if not b99_files:
+            st.error("Keine B99-Dateien im 'Figure Files' Ordner gefunden.")
+            return
+
+        cutoff_layer = find_infill_cutoff(b99_files)
+
+        infill_files = []
+        support_count = 0
+        contour_count = 0
+        for f in b99_files:
+            fname = os.path.basename(f)
+            cls = classify_b99(fname)
+            layer = extract_layer_number(fname)
+            if layer < cutoff_layer:
+                support_count += 1
+                continue
+            if cls in ('infill_even', 'infill_9'):
+                infill_files.append((f, layer))
+            else:
+                contour_count += 1
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("B99-Dateien gesamt", len(b99_files))
+        col2.metric(f"Infill-Dateien (ab Schicht {cutoff_layer})", len(infill_files))
+        col3.metric("Kontur / Stützstruktur", contour_count + support_count)
+
+        if not infill_files:
+            st.warning("Keine Infill-Dateien gefunden.")
+            return
+
+        # --- Vorschau ---
+        st.markdown("---")
+        st.subheader("Vorschau")
+
+        infill_names = [os.path.basename(f) for f, _ in infill_files]
+        preview_name = st.selectbox("Datei für Vorschau auswählen:", infill_names)
+        preview_idx = infill_names.index(preview_name)
+        preview_path, preview_layer = infill_files[preview_idx]
+
+        col_orig, col_new = st.columns(2)
+        with col_orig:
+            st.markdown("**Original (aus Slicer)**")
+
+        show_heatmap_prev = st.checkbox("Wärmeakkumulation in Vorschau anzeigen", value=False)
+        material_name_prev = None
+        t_point_us_prev = 13.0
+        if show_heatmap_prev:
+            material_name_prev = st.selectbox("Material", list(MATERIALS.keys()), key="mat_prev")
+            t_point_us_prev = st.number_input("Punkthaltezeit (µs)", value=13.0, step=1.0, key="t_prev")
+
+        _show_preview(preview_path, params, preview_layer, reordered=False,
+                      show_heatmap=show_heatmap_prev, material_name=material_name_prev,
+                      t_point_us=t_point_us_prev)
+
+        # Schema-Diagramme
+        with st.expander("Schema: Segmentierung (Stufe 1)"):
+            seg = params['segmentation']
+            if seg == 'Keine Segmentierung':
+                st.components.v1.html(SchemaDiagrams.get_seg_none(), height=220)
+            elif 'Schachbrett' in seg:
+                st.components.v1.html(SchemaDiagrams.get_seg_chessboard(), height=220)
+            elif 'Streifen' in seg:
+                st.components.v1.html(SchemaDiagrams.get_seg_stripes(), height=220)
+            elif 'Hexagonal' in seg:
+                st.components.v1.html(SchemaDiagrams.get_seg_hexagonal(), height=220)
+            elif 'Spiralzonen' in seg:
+                st.components.v1.html(SchemaDiagrams.get_seg_spiral_zones(), height=220)
+
+        with st.expander("Schema: Mikro-Scan-Strategie (Stufe 2)"):
+            ms = params['micro_strategy']
+            if 'Raster' in ms:
+                st.components.v1.html(SchemaDiagrams.get_raster(), height=220)
+            elif ms == 'Spot Consecutive':
+                st.components.v1.html(SchemaDiagrams.get_spot_consecutive(), height=220)
+            elif ms == 'Spot Ordered':
+                st.components.v1.html(SchemaDiagrams.get_spot_ordered(), height=220)
+            elif ms == 'Ghost Beam':
+                st.components.v1.html(SchemaDiagrams.get_ghost_beam(), height=220)
+            elif ms == 'Hilbert-Kurve':
+                st.components.v1.html(SchemaDiagrams.get_hilbert(), height=220)
+            elif ms == 'Spiral':
+                st.components.v1.html(SchemaDiagrams.get_spiral(), height=220)
+            elif ms == 'Peano-Kurve':
+                st.components.v1.html(SchemaDiagrams.get_raster(), height=220)  # Fallback
+
+        # --- Batch-Verarbeitung ---
+        st.markdown("---")
+        if st.button("Strategie anwenden & neues ZIP erstellen", type="primary"):
+            progress = st.progress(0)
+            errors = []
+
+            for i, (filepath, layer) in enumerate(infill_files):
+                try:
+                    process_single_infill(filepath, params, layer)
+                except Exception as e:
+                    errors.append(f"{os.path.basename(filepath)}: {e}")
+                progress.progress((i + 1) / len(infill_files))
+
+            # Ausgabe-ZIP erstellen
+            os.makedirs(output_dir, exist_ok=True)
+            base_name = os.path.splitext(uploaded_zip.name)[0]
+            out_zip_name = base_name + "_NEW.zip"
+            out_zip_path = os.path.join(output_dir, out_zip_name)
+
+            with zipfile.ZipFile(out_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(extract_dir):
+                    for file in files:
+                        abs_path = os.path.join(root, file)
+                        arc_name = os.path.relpath(abs_path, extract_dir)
+                        zf.write(abs_path, arc_name)
+
+            if errors:
+                st.warning(f"{len(errors)} Fehler beim Verarbeiten:")
+                for err in errors:
+                    st.text(err)
+
+            ok_count = len(infill_files) - len(errors)
+            st.success(f"{ok_count} Infill-Dateien erfolgreich konvertiert → {out_zip_path}")
+
+            with open(out_zip_path, 'rb') as f:
+                st.download_button(
+                    "Download neues ZIP",
+                    f.read(),
+                    file_name=out_zip_name,
+                    mime="application/zip"
+                )
+
+            # Vorschau nach Verarbeitung (dieselbe Datei, jetzt schon überschrieben)
+            st.subheader("Vorschau nach Neuanordnung")
+            _show_preview(preview_path, params, preview_layer, reordered=False,
+                          show_heatmap=show_heatmap_prev, material_name=material_name_prev,
+                          t_point_us=t_point_us_prev)
+
 
 if __name__ == "__main__":
     main()

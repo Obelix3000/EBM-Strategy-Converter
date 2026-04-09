@@ -210,13 +210,175 @@ class SchemaDiagrams:
     .text { font-family: sans-serif; font-size: 14px; fill: #374151; }
   </style>
   <rect width="600" height="200" fill="#ffffff" />
-  
+
   <rect x="200" y="30" width="200" height="140" class="path" />
   <rect x="220" y="50" width="160" height="100" class="path" />
   <rect x="240" y="70" width="120" height="60" class="path" />
-  
+
   <path class="jump" d="M 300 30 L 300 50" />
   <path class="jump" d="M 300 50 L 300 70" />
-  
+
   <text x="430" y="100" class="text">Inward Spiraling (Keine 180° Wenden)</text>
+</svg>"""
+
+    # ------------------------------------------------------------------
+    # Stufe-1-Schemata: Segmentierungstypen
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_seg_none() -> str:
+        """Schema: Keine Segmentierung – einfaches Rechteck."""
+        return """<svg width="600" height="200" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .box { fill: #DBEAFE; stroke: #2563EB; stroke-width: 2; }
+    .line { stroke: #2563EB; stroke-width: 2; fill: none; }
+    .text { font-family: sans-serif; font-size: 13px; fill: #374151; }
+  </style>
+  <rect width="600" height="200" fill="#ffffff" />
+  <rect x="180" y="40" width="240" height="120" class="box" />
+  <line x1="180" y1="60" x2="420" y2="60" class="line" />
+  <line x1="180" y1="80" x2="420" y2="80" class="line" />
+  <line x1="180" y1="100" x2="420" y2="100" class="line" />
+  <line x1="180" y1="120" x2="420" y2="120" class="line" />
+  <line x1="180" y1="140" x2="420" y2="140" class="line" />
+  <text x="450" y="100" class="text">1 Segment</text>
+  <text x="450" y="120" class="text">(gesamte Fläche)</text>
+</svg>"""
+
+    @staticmethod
+    def get_seg_chessboard() -> str:
+        """Schema: Schachbrett-Segmentierung – 4×3 Grid, alternierend nummeriert."""
+        return """<svg width="600" height="200" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .ca { fill: #DBEAFE; stroke: #2563EB; stroke-width: 1; }
+    .cb { fill: #DCFCE7; stroke: #16A34A; stroke-width: 1; }
+    .text { font-family: sans-serif; font-size: 12px; fill: #374151; text-anchor: middle; }
+    .label { font-family: sans-serif; font-size: 11px; fill: #374151; }
+  </style>
+  <rect width="600" height="200" fill="#ffffff" />
+  <g transform="translate(120, 20)">
+    <!-- Reihe 1 -->
+    <rect x="0"   y="0"  width="80" height="53" class="ca"/><text x="40"  y="30"  class="text">A1</text>
+    <rect x="80"  y="0"  width="80" height="53" class="cb"/><text x="120" y="30"  class="text">B1</text>
+    <rect x="160" y="0"  width="80" height="53" class="ca"/><text x="200" y="30"  class="text">A2</text>
+    <rect x="240" y="0"  width="80" height="53" class="cb"/><text x="280" y="30"  class="text">B2</text>
+    <!-- Reihe 2 -->
+    <rect x="0"   y="53" width="80" height="54" class="cb"/><text x="40"  y="83"  class="text">B3</text>
+    <rect x="80"  y="53" width="80" height="54" class="ca"/><text x="120" y="83"  class="text">A3</text>
+    <rect x="160" y="53" width="80" height="54" class="cb"/><text x="200" y="83"  class="text">B4</text>
+    <rect x="240" y="53" width="80" height="54" class="ca"/><text x="280" y="83"  class="text">A4</text>
+    <!-- Reihe 3 -->
+    <rect x="0"   y="107" width="80" height="53" class="ca"/><text x="40"  y="137" class="text">A5</text>
+    <rect x="80"  y="107" width="80" height="53" class="cb"/><text x="120" y="137" class="text">B5</text>
+    <rect x="160" y="107" width="80" height="53" class="ca"/><text x="200" y="137" class="text">A6</text>
+    <rect x="240" y="107" width="80" height="53" class="cb"/><text x="280" y="137" class="text">B6</text>
+  </g>
+  <text x="460" y="80"  class="label" fill="#2563EB">Phase A zuerst</text>
+  <text x="460" y="100" class="label" fill="#16A34A">dann Phase B</text>
+</svg>"""
+
+    @staticmethod
+    def get_seg_stripes() -> str:
+        """Schema: Streifen-Segmentierung – 4 parallele Bänder."""
+        return """<svg width="600" height="200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow-stripe" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563EB" />
+    </marker>
+  </defs>
+  <style>
+    .s1 { fill: #DBEAFE; stroke: #2563EB; stroke-width: 1.5; }
+    .s2 { fill: #EDE9FE; stroke: #7C3AED; stroke-width: 1.5; }
+    .s3 { fill: #FEF9C3; stroke: #CA8A04; stroke-width: 1.5; }
+    .s4 { fill: #DCFCE7; stroke: #16A34A; stroke-width: 1.5; }
+    .arr { stroke: #374151; stroke-width: 1.5; fill: none; marker-end: url(#arrow-stripe); }
+    .text { font-family: sans-serif; font-size: 12px; fill: #374151; text-anchor: middle; }
+    .num  { font-family: sans-serif; font-size: 14px; font-weight: bold; fill: #374151; text-anchor: middle; }
+  </style>
+  <rect width="600" height="200" fill="#ffffff" />
+  <rect x="150" y="30"  width="240" height="35" class="s1"/><text x="270" y="52"  class="num">1</text>
+  <rect x="150" y="65"  width="240" height="35" class="s2"/><text x="270" y="87"  class="num">2</text>
+  <rect x="150" y="100" width="240" height="35" class="s3"/><text x="270" y="122" class="num">3</text>
+  <rect x="150" y="135" width="240" height="35" class="s4"/><text x="270" y="157" class="num">4</text>
+  <path class="arr" d="M 410 47 L 450 47" />
+  <path class="arr" d="M 410 82 L 450 82" />
+  <path class="arr" d="M 410 117 L 450 117" />
+  <path class="arr" d="M 410 152 L 450 152" />
+  <text x="490" y="52"  class="text">Streifen 1</text>
+  <text x="490" y="87"  class="text">Streifen 2</text>
+  <text x="490" y="122" class="text">Streifen 3</text>
+  <text x="490" y="157" class="text">Streifen 4</text>
+</svg>"""
+
+    @staticmethod
+    def get_seg_hexagonal() -> str:
+        """Schema: Hexagonale Segmentierung – Wabenmuster, alternierend A/B."""
+        return """<svg width="600" height="200" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .ha { fill: #DBEAFE; stroke: #2563EB; stroke-width: 1.5; }
+    .hb { fill: #DCFCE7; stroke: #16A34A; stroke-width: 1.5; }
+    .text { font-family: sans-serif; font-size: 11px; fill: #374151; text-anchor: middle; }
+    .label { font-family: sans-serif; font-size: 12px; fill: #374151; }
+  </style>
+  <rect width="600" height="200" fill="#ffffff" />
+  <!-- Hexagone: Reihe 1 -->
+  <polygon points="100,40 130,25 160,40 160,70 130,85 100,70" class="ha"/>
+  <text x="130" y="57" class="text">A</text>
+  <polygon points="160,40 190,25 220,40 220,70 190,85 160,70" class="hb"/>
+  <text x="190" y="57" class="text">B</text>
+  <polygon points="220,40 250,25 280,40 280,70 250,85 220,70" class="ha"/>
+  <text x="250" y="57" class="text">A</text>
+  <polygon points="280,40 310,25 340,40 340,70 310,85 280,70" class="hb"/>
+  <text x="310" y="57" class="text">B</text>
+  <!-- Hexagone: Reihe 2 (versetzt) -->
+  <polygon points="130,85 160,70 190,85 190,115 160,130 130,115" class="hb"/>
+  <text x="160" y="102" class="text">B</text>
+  <polygon points="190,85 220,70 250,85 250,115 220,130 190,115" class="ha"/>
+  <text x="220" y="102" class="text">A</text>
+  <polygon points="250,85 280,70 310,85 310,115 280,130 250,115" class="hb"/>
+  <text x="280" y="102" class="text">B</text>
+  <polygon points="310,85 340,70 370,85 370,115 340,130 310,115" class="ha"/>
+  <text x="340" y="102" class="text">A</text>
+  <!-- Reihe 3 -->
+  <polygon points="100,115 130,100 160,115 160,145 130,160 100,145" class="ha"/>
+  <text x="130" y="132" class="text">A</text>
+  <polygon points="160,115 190,100 220,115 220,145 190,160 160,145" class="hb"/>
+  <text x="190" y="132" class="text">B</text>
+  <polygon points="220,115 250,100 280,115 280,145 250,160 220,145" class="ha"/>
+  <text x="250" y="132" class="text">A</text>
+  <text x="420" y="85"  class="label" fill="#2563EB">Phase A zuerst</text>
+  <text x="420" y="105" class="label" fill="#16A34A">dann Phase B</text>
+  <text x="420" y="130" class="label">Versetztes Waben-Gitter</text>
+</svg>"""
+
+    @staticmethod
+    def get_seg_spiral_zones() -> str:
+        """Schema: Spiralzonen – konzentrische Ringe um den Schwerpunkt."""
+        return """<svg width="600" height="200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow-sz" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563EB" />
+    </marker>
+  </defs>
+  <style>
+    .r1 { fill: #DBEAFE; stroke: #2563EB; stroke-width: 1.5; }
+    .r2 { fill: #EDE9FE; stroke: #7C3AED; stroke-width: 1.5; }
+    .r3 { fill: #DCFCE7; stroke: #16A34A; stroke-width: 1.5; }
+    .arr { stroke: #374151; stroke-width: 1.5; fill: none; marker-end: url(#arrow-sz); }
+    .text { font-family: sans-serif; font-size: 12px; fill: #374151; text-anchor: middle; }
+    .label { font-family: sans-serif; font-size: 12px; fill: #374151; }
+  </style>
+  <rect width="600" height="200" fill="#ffffff" />
+  <circle cx="250" cy="100" r="80" class="r1"/>
+  <circle cx="250" cy="100" r="52" class="r2"/>
+  <circle cx="250" cy="100" r="24" class="r3"/>
+  <circle cx="250" cy="100" r="5"  fill="#1E3A5F"/>
+  <!-- Richtungspfeil außen→innen -->
+  <path class="arr" d="M 250 20 L 250 50" />
+  <path class="arr" d="M 250 50 L 250 78" />
+  <text x="250" y="14"  class="text">Ring 1 (außen)</text>
+  <text x="250" y="67"  class="text">Ring 2</text>
+  <text x="250" y="105" class="text">Ring 3</text>
+  <text x="390" y="85"  class="label">Außen → Innen</text>
+  <text x="390" y="105" class="label">(oder umgekehrt)</text>
 </svg>"""

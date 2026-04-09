@@ -1,5 +1,6 @@
 import re
-from typing import List
+from typing import List, Tuple
+import numpy as np
 from shapely.geometry import Polygon, MultiPoint
 
 class B99Parser:
@@ -80,3 +81,36 @@ class B99Parser:
                     layer_polygons.append(buffered)
                 
         return layer_polygons
+
+    @staticmethod
+    def extract_points_and_header(b99_content: str) -> Tuple[List[str], np.ndarray]:
+        """
+        Extrahiert alle Header-Zeilen (bis einschließlich 'data') und alle ABS-Koordinaten
+        als N×2 NumPy-Array in mm. Positionen werden NICHT verändert – nur ausgelesen.
+
+        :param b99_content: Rohinhalt einer .B99-Datei als String.
+        :return: (header_lines, points_mm) – header_lines ist eine Liste von Strings,
+                 points_mm ein np.ndarray der Form (N, 2).
+        """
+        header_lines: List[str] = []
+        points: List[List[float]] = []
+        in_data = False
+
+        for line in b99_content.splitlines():
+            stripped = line.strip()
+            if not in_data:
+                header_lines.append(line)
+                if stripped.startswith("data"):
+                    in_data = True
+            elif stripped.startswith("ABS"):
+                parts = stripped.split()
+                if len(parts) >= 3:
+                    try:
+                        x_mm = float(parts[1]) * 60.0
+                        y_mm = float(parts[2]) * 60.0
+                        points.append([x_mm, y_mm])
+                    except ValueError:
+                        continue
+
+        arr = np.array(points, dtype=np.float64) if points else np.empty((0, 2), dtype=np.float64)
+        return header_lines, arr
