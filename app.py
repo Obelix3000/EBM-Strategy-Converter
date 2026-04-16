@@ -114,6 +114,10 @@ def render_strategy_ui() -> dict:
 
     if micro_strategy == "Ghost Beam":
         ghost_lag = st.number_input("Secondary Beam Lag (µm)", min_value=10.0, value=1000.0, step=100.0)
+        st.info(
+            "Ghost Beam verdoppelt die Punktanzahl im Output (Primär- + Geistpunkte). "
+            "Das ist korrekt und erwünscht – bitte bei der Maschinenzeit einkalkulieren."
+        )
     if micro_strategy == "Spot Ordered":
         spot_skip = st.number_input("Skip Offset", value=2, step=1)
     if micro_strategy in ("Hilbert-Kurve", "Peano-Kurve"):
@@ -285,6 +289,26 @@ def main():
         preview_name = st.selectbox("Datei für Vorschau auswählen:", infill_names)
         preview_idx = infill_names.index(preview_name)
         preview_path, preview_layer = infill_files[preview_idx]
+
+        # Schachbrett-Dichte prüfen: Warnung wenn Zellen zu wenig Punkte haben
+        if 'Schachbrett' in params['segmentation']:
+            with open(preview_path, 'r', encoding='utf-8', errors='replace') as _f:
+                _content = _f.read()
+            from src.parser import B99Parser
+            _, _pts = B99Parser.extract_points_and_header(_content)
+            if len(_pts) > 0:
+                seg_size = params['seg_size']
+                _minx, _miny = _pts[:, 0].min(), _pts[:, 1].min()
+                _maxx, _maxy = _pts[:, 0].max(), _pts[:, 1].max()
+                n_cells_x = max(1, int((_maxx - _minx) / seg_size))
+                n_cells_y = max(1, int((_maxy - _miny) / seg_size))
+                avg_pts_per_cell = len(_pts) / (n_cells_x * n_cells_y)
+                if avg_pts_per_cell < 20:
+                    st.warning(
+                        f"Segmentgröße zu klein für diese Datei: "
+                        f"Ø {avg_pts_per_cell:.1f} Punkte/Zelle (Minimum: 20). "
+                        f"Segmentgröße erhöhen oder Schachbrett deaktivieren."
+                    )
 
         col_orig, col_new = st.columns(2)
         with col_orig:

@@ -25,16 +25,20 @@ def reorder_points(points_mm: np.ndarray, params: dict, layer_idx: int) -> np.nd
       2. Stufe 1: Punkte in Segmente aufteilen.
       3. Stufe 2: Innerhalb jedes Segments sortieren.
       4. Alle Ergebnisse zu einem Array zusammenführen.
+      5. Ghost Beam (falls gewählt) wird NACH der Zusammenführung auf den Gesamtpfad
+         angewandt – nicht pro Segment, da es sonst bei kleinen Segmenten entartet.
 
     :param points_mm: np.ndarray (N, 2) – original Punkte in mm.
     :param params:    Parameter-Dict aus render_strategy_ui().
     :param layer_idx: Schichtindex (für schichtweise Rotation).
     :return:          np.ndarray (N, 2) – gleiche Punkte, neue Reihenfolge.
+                      (Bei Ghost Beam: 2×N Punkte, da Primär- + Geistpunkte interleaved.)
     """
     if len(points_mm) == 0:
         return points_mm
 
     rotation = (layer_idx * params.get('rotation_angle_deg', 67.0)) % 360.0
+    micro_strategy = params.get('micro_strategy', 'Raster (Zick-Zack)')
 
     # Polygon aus Punkten (für Segmentierungsalgorithmen wie Spiralzonen)
     polygon = MultiPoint(points_mm).convex_hull
@@ -46,15 +50,26 @@ def reorder_points(points_mm: np.ndarray, params: dict, layer_idx: int) -> np.nd
     else:
         segments = segment_points(points_mm, polygon, params, rotation)
 
-    # Stufe 2: Mikro-Sortierung innerhalb jedes Segments
+    # Stufe 2: Mikro-Sortierung innerhalb jedes Segments.
+    # Ghost Beam: pro Segment nur Raster-Vorsortierung; das Ghost-Interleaving
+    # erfolgt erst nach der Zusammenführung auf dem Gesamtpfad (siehe unten).
     reordered = []
     for seg_pts in segments:
         if len(seg_pts) == 0:
             continue
-        sorted_pts = sort_within_segment(seg_pts, params, rotation)
+        if micro_strategy == 'Ghost Beam':
+            sorted_pts = sort_raster(seg_pts, params, rotation)
+        else:
+            sorted_pts = sort_within_segment(seg_pts, params, rotation)
         reordered.append(sorted_pts)
 
-    return np.vstack(reordered) if reordered else points_mm
+    combined = np.vstack(reordered) if reordered else points_mm
+
+    # Ghost Beam auf den vollständigen Pfad anwenden
+    if micro_strategy == 'Ghost Beam':
+        combined = sort_ghost_beam(combined, params, rotation)
+
+    return combined
 
 
 # ---------------------------------------------------------------------------
@@ -226,15 +241,17 @@ def _cells_by_dist(cells: list, reverse: bool) -> list:
 # ---------------------------------------------------------------------------
 
 def sort_within_segment(points: np.ndarray, params: dict, rotation: float) -> np.ndarray:
-    """Dispatcht an die gewählte Mikro-Sortierfunktion."""
+    """Dispatcht an die gewählte Mikro-Sortierfunktion.
+
+    Hinweis: Ghost Beam wird NICHT hier dispatcht – reorder_points() wendet
+    sort_ghost_beam() nach der Zusammenführung aller Segmente auf den Gesamtpfad an.
+    """
     strategy = params.get('micro_strategy', 'Raster (Zick-Zack)')
 
     if strategy in ('Raster (Zick-Zack)', 'Spot Consecutive'):
         return sort_raster(points, params, rotation)
     elif strategy == 'Spot Ordered':
         return sort_spot_ordered(points, params, rotation)
-    elif strategy == 'Ghost Beam':
-        return sort_ghost_beam(points, params, rotation)
     elif strategy == 'Hilbert-Kurve':
         return sort_hilbert(points, params)
     elif strategy == 'Spiral':
@@ -247,28 +264,23 @@ def sort_within_segment(points: np.ndarray, params: dict, rotation: float) -> np
 def sort_raster(points: np.ndarray, params: dict, rotation: float) -> np.ndarray:
     """
     Raster-Sortierung (Zick-Zack):
-    - Transformiere Punkte ins rotierte Koordinatensystem (nur für Sortierung).
-    - Quantisiere Y in Hatch-Zeilen.
-    - Sortiere abwechselnd nach X (Zick-Zack).
+    Erkennt die natürlichen Y-Linien im Input via Rundung auf 50 µm und sortiert
+    die Punkte zeilenweise abwechselnd nach X (Zick-Zack).
+
+    Wichtig: Die vom Slicer vorgegebene Linienstruktur wird NICHT verändert –
+    keine Rotation der Koordinaten, keine hatch_spacing-basierte Quantisierung.
+    Rotation und hatch_spacing sind für diesen Sort irrelevant, da die Linien
+    bereits in der korrekten Orientierung und mit dem korrekten Abstand vorliegen.
     """
-    hatch_mm = params.get('hatch_spacing', 200.0) / 1000.0
-
-    cos_r = np.cos(np.radians(-rotation))
-    sin_r = np.sin(np.radians(-rotation))
-    cx, cy = points.mean(axis=0)
-    rel = points - [cx, cy]
-    rot_x = rel[:, 0] * cos_r - rel[:, 1] * sin_r
-    rot_y = rel[:, 0] * sin_r + rel[:, 1] * cos_r
-
-    y_bins = np.round(rot_y / hatch_mm).astype(int)
-    indices = np.arange(len(points))
-    unique_bins = np.unique(y_bins)
+    # Natürliche Y-Cluster im Input erkennen (50 µm Raster = halber Punktabstand)
+    y_rounded = np.round(points[:, 1] / 0.05) * 0.05
+    unique_ys = np.unique(y_rounded)
 
     sorted_indices = []
-    for i, yb in enumerate(unique_bins):
-        mask = y_bins == yb
-        row_idx = indices[mask]
-        row_x = rot_x[mask]
+    for i, yc in enumerate(unique_ys):
+        mask = y_rounded == yc
+        row_idx = np.where(mask)[0]
+        row_x = points[mask, 0]
         order = np.argsort(row_x)
         if i % 2 == 1:          # Zick-Zack: jede zweite Zeile umkehren
             order = order[::-1]
@@ -293,20 +305,28 @@ def sort_spot_ordered(points: np.ndarray, params: dict, rotation: float) -> np.n
 
 def sort_ghost_beam(points: np.ndarray, params: dict, rotation: float) -> np.ndarray:
     """
-    Ghost Beam:
-    Raster-Sortierung, dann Interleave: primärer Punkt + nachlaufender Geistpunkt
-    (P1 → S1 → P2 → S2 …). Der Geistpunkt liegt ~ghost_lag µm hinter dem Primärpunkt.
+    Ghost Beam – Interleaving auf bereits sortiertem Pfad:
+    Erzeugt P1 → S1 → P2 → S2 … wobei S_i ein nachlaufender Geistpunkt
+    (~ghost_lag µm hinter P_i) ist. Verdoppelt die Punktanzahl.
+
+    Erwartet einen bereits raster-sortierten Pfad als Input (reorder_points()
+    übernimmt die Vorsortierung pro Segment vor diesem Aufruf).
+
+    Sicherheitscheck: Wenn N < 2 * lag_count (Segment zu klein für den Lag),
+    wird lag_count dynamisch auf max(1, N // 4) reduziert.
     """
-    base = sort_raster(points, params, rotation)
     ghost_lag_mm = params.get('ghost_lag', 1000.0) / 1000.0
     point_spacing_mm = params.get('point_spacing', 100.0) / 1000.0
     lag_count = max(1, int(ghost_lag_mm / point_spacing_mm))
 
-    N = len(base)
-    result = np.empty((N * 2, 2), dtype=base.dtype)
+    N = len(points)
+    if N < 2 * lag_count:
+        lag_count = max(1, N // 4)
+
+    result = np.empty((N * 2, 2), dtype=points.dtype)
     for i in range(N):
-        result[2 * i] = base[i]
-        result[2 * i + 1] = base[max(0, i - lag_count)]
+        result[2 * i] = points[i]
+        result[2 * i + 1] = points[max(0, i - lag_count)]
     return result
 
 

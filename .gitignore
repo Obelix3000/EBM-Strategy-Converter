@@ -22,9 +22,11 @@ ENV/
 # Ausgabe-Ordner der App
 EBM_Output/
 data/
-
+ABSPathOptimizer.exe_extracted/
+ABSPathOptimizer.exe
 # Planungsdokumente (intern)
 update.md
 implemetierungsplan.md
 literature_sources.md
 src/test.md
+bug_behebung.md

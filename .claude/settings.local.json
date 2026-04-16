@@ -6,7 +6,12 @@
       "Bash(.venv/Scripts/python.exe -c \"import app; print\\(''app.py Import OK''\\)\")",
       "Bash(cd:*)",
       "Bash(.venv/Scripts/python.exe -c \"import app; print\\(''app.py nach Bereinigung OK''\\)\")",
-      "Bash(.venv/Scripts/python.exe -c \"import app; print\\(''OK''\\)\")"
+      "Bash(.venv/Scripts/python.exe -c \"import app; print\\(''OK''\\)\")",
+      "Bash(python -c \"import streamlit\")",
+      "Bash(pip install *)",
+      "Bash(python -c \"import streamlit; print\\(streamlit.__version__\\)\")",
+      "Bash(python -c \"from src.reorder import reorder_points, sort_raster, sort_ghost_beam; import numpy as np; pts = np.random.rand\\(100, 2\\); p = {'segmentation': 'Keine Segmentierung', 'micro_strategy': 'Raster \\(Zick-Zack\\)', 'hatch_spacing': 200.0, 'rotation_angle_deg': 67.0}; out = reorder_points\\(pts, p, 1\\); print\\('Raster OK, shape:', out.shape\\); p2 = {**p, 'micro_strategy': 'Ghost Beam', 'ghost_lag': 1000.0, 'point_spacing': 100.0}; out2 = reorder_points\\(pts, p2, 1\\); print\\('Ghost Beam OK, shape:', out2.shape\\); p3 = {**p, 'micro_strategy': 'Ghost Beam', 'ghost_lag': 1000.0, 'point_spacing': 100.0, 'segmentation': 'Schachbrett \\(Island\\)', 'seg_size': 5.0, 'seg_order': 'Schachbrett \\(schwarz\\\\u2192wei\\\\u00df\\)'}; out3 = reorder_points\\(pts * 60, p3, 1\\); print\\('Schachbrett+Ghost OK, shape:', out3.shape\\)\")",
+      "Bash(python -c \"import ast, sys; ast.parse\\(open\\('app.py'\\).read\\(\\)\\); print\\('app.py syntax OK'\\)\")"
     ]
   }
 }
