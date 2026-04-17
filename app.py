@@ -56,7 +56,7 @@ def find_infill_cutoff(b99_files: list) -> int:
     Findet die erste Schichtnummer, in der eine Infill-Datei mit gerader
     vorletzter Ziffer vorkommt. Alle Schichten davor = Stützstruktur.
     """
-    for f in sorted(b99_files):
+    for f in sorted(b99_files, key=lambda x: extract_layer_number(os.path.basename(x))):
         if classify_b99(os.path.basename(f)) == 'infill_even':
             return extract_layer_number(os.path.basename(f))
     return 2 ** 31  # Kein Infill gefunden
@@ -250,7 +250,10 @@ def main():
             return
 
         # B99-Dateien finden
-        b99_files = sorted(glob.glob(os.path.join(figure_dir, "*.[Bb]99")))
+        b99_files = sorted(
+            glob.glob(os.path.join(figure_dir, "*.[Bb]99")),
+            key=lambda x: extract_layer_number(os.path.basename(x))
+        )
         if not b99_files:
             st.error("Keine B99-Dateien im 'Figure Files' Ordner gefunden.")
             return
