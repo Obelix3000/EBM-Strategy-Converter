@@ -1,32 +1,66 @@
-# Byte-compiled / optimized files
+# ============================================================
+# .gitignore – EBM Strategy Converter
+# Nur zwingend notwendige Quelldateien sind im Repository.
+# ============================================================
+
+# --- Python-Laufzeitdateien ---
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
 
-# Virtual environments
+# --- Virtuelle Environments ---
 .venv/
 venv/
 env/
 ENV/
 
-# Streamlit
-.streamlit/
+# --- Betriebssystem ---
 .DS_Store
+Thumbs.db
+desktop.ini
 
-# B99-Ausgabedateien und temporäre Daten
+# --- IDEs und Editoren ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- KI-Agenten-Konfiguration (intern) ---
+.claude/
+CLAUDE.md
+
+# --- B99-Maschinendaten und ZIP-Archive ---
+# (Baujob-Dateien sind proprietäre Maschinendaten, nicht im Repo)
 *.B99
 *.b99
-*.pdf
 *.zip
 
-# Ausgabe-Ordner der App
+# --- Externe Binärdateien und dekompilierte Artefakte ---
+ABSPathOptimizer.exe
+ABSPathOptimizer.exe_extracted/
+pyinstxtractor.py
+decompiled.py
+disasm.txt
+
+# --- Urheberrechtlich geschützte Literatur ---
+*.pdf
+
+# --- Temporäre Arbeitsdateien / Scratchdateien ---
+_temp_pdf.txt
+extract_pdf.py
+perf_test.py
+
+# --- App-Ausgaben ---
 EBM_Output/
 data/
-ABSPathOptimizer.exe_extracted/
-ABSPathOptimizer.exe
-# Planungsdokumente (intern)
+
+# --- Interne Notizen und Planungsdokumente ---
+bug_behebung.md
+literature_sources.md
 update.md
 implemetierungsplan.md
-literature_sources.md
 src/test.md
-bug_behebung.md
+
+# --- Streamlit-Cache ---
+.streamlit/
