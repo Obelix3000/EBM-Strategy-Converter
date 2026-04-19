@@ -26,10 +26,6 @@ desktop.ini
 *.swp
 *.swo
 
-# --- Versteckte Konfigurationsordner ---
-.claude/
-.config/
-
 # --- B99-Maschinendaten und ZIP-Archive ---
 *.B99
 *.b99
