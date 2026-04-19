@@ -26,12 +26,11 @@ desktop.ini
 *.swp
 *.swo
 
-# --- KI-Agenten-Konfiguration (intern) ---
+# --- Versteckte Konfigurationsordner ---
 .claude/
-CLAUDE.md
+.config/
 
 # --- B99-Maschinendaten und ZIP-Archive ---
-# (Baujob-Dateien sind proprietäre Maschinendaten, nicht im Repo)
 *.B99
 *.b99
 *.zip
@@ -46,7 +45,7 @@ disasm.txt
 # --- Urheberrechtlich geschützte Literatur ---
 *.pdf
 
-# --- Temporäre Arbeitsdateien / Scratchdateien ---
+# --- Temporäre Arbeitsdateien ---
 _temp_pdf.txt
 extract_pdf.py
 perf_test.py
