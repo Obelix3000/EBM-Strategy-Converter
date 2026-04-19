@@ -6,10 +6,37 @@ Werkzeug zur Neuanordnung von Elektronenstrahl-Belichtungsstrategien für den **
 
 ---
 
-## Installation
+## ▶️ Schnellstart (Empfohlen)
+
+**Doppelklick auf `Start App.bat`** im Projektordner.
+
+Die Batch-Datei:
+1. Aktiviert automatisch das virtuelle Python-Environment (`.venv`)
+2. Startet den Streamlit-Server
+3. Öffnet die App im Standard-Browser unter `http://localhost:8501`
+
+> **Hinweis:** Das schwarze Terminal-Fenster muss geöffnet bleiben, solange die App läuft – es kann aber minimiert werden. Beim Schließen des Fensters wird die App beendet.
+
+> **Windows-Sicherheitswarnung:** Beim ersten Start fragt Windows möglicherweise nach Bestätigung → „Trotzdem ausführen" klicken.
+
+---
+
+## 🔧 Installation (Erstmalige Einrichtung)
+
+Falls das virtuelle Environment noch nicht existiert:
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+Danach reicht dauerhaft ein Doppelklick auf `Start App.bat`.
+
+### Alternativ: Manueller Start über Terminal
+
+```bash
+.venv\Scripts\activate
 streamlit run app.py
 ```
 
@@ -100,6 +127,25 @@ Die Software erkennt Infill-Dateien anhand der **vorletzten Ziffer** vor `.B99` 
 - Befehlsformat: `ABS <x_rel> <y_rel>` pro Punkt
 - Ausgabe: 17 signifikante Stellen, `\r\n`-Zeilenenden (wie im Original)
 - Zwischen Segmenten: impliziter Beam-off-Jump (kein explizites Kommando nötig)
+
+---
+
+## Projektstruktur
+
+```
+EBM-Strategy-Software/
+├── Start App.bat          # ▶ Schnellstart per Doppelklick
+├── app.py                 # Haupt-Streamlit-Anwendung
+├── requirements.txt       # Python-Abhängigkeiten
+├── src/
+│   ├── parser.py          # B99-Datei-Parser
+│   ├── exporter.py        # B99-Datei-Export
+│   ├── reorder.py         # Punkt-Neuanordnungslogik
+│   ├── visualization.py   # Plotly-Visualisierung
+│   ├── schema_diagrams.py # Schematische SVG-Diagramme
+│   └── thermal.py         # Wärmeakkumulationsmodell
+└── .venv/                 # Virtuelles Python-Environment
+```
 
 ---
 
