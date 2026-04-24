@@ -92,7 +92,7 @@ def segment_points(points_mm: np.ndarray, polygon, params: dict, rotation: float
         return _segment_spiral_zones(points_mm, polygon, seg_size, seg_order)
     return [points_mm]
 
-
+# Funktion um das Schachbrett zu segmentieren
 def _segment_chessboard(points_mm: np.ndarray, seg_size: float, seg_order: str):
     """Schachbrett-Segmentierung: erst Phase A ((row+col)%2==0), dann Phase B."""
     if len(points_mm) == 0:
@@ -107,13 +107,16 @@ def _segment_chessboard(points_mm: np.ndarray, seg_size: float, seg_order: str):
     cell_keys = np.stack([row_idx, col_idx], axis=1)  # (N, 2)
     unique_cells = list(set(map(tuple, cell_keys.tolist())))
 
+    # Hier werden die Phasen A und B definiert, welche die zellen beschreiben, die in dieser Phase abgearbeitet werden
     phase_a = [(r, c) for (r, c) in unique_cells if (r + c) % 2 == 0]
     phase_b = [(r, c) for (r, c) in unique_cells if (r + c) % 2 == 1]
 
+    #Hier werden die Phasen A und B sortiert 
     phase_a = _order_cells(phase_a, seg_order)
     phase_b = _order_cells(phase_b, seg_order)
     ordered = phase_a + phase_b
 
+    # Hier werden die Segmente zusammengefügt
     segments = []
     for (r, c) in ordered:
         mask = (row_idx == r) & (col_idx == c)
@@ -122,7 +125,7 @@ def _segment_chessboard(points_mm: np.ndarray, seg_size: float, seg_order: str):
             segments.append(pts)
     return segments
 
-
+# Funktion um Streifen zu segmentieren
 def _segment_stripes(points_mm: np.ndarray, seg_size: float, rotation: float, seg_order: str):
     """Streifen-Segmentierung: parallele Bänder senkrecht zur aktuellen Hatch-Richtung."""
     if len(points_mm) == 0:
@@ -144,6 +147,7 @@ def _segment_stripes(points_mm: np.ndarray, seg_size: float, rotation: float, se
         unique_stripes = list(unique_stripes)
         rng.shuffle(unique_stripes)
 
+    # Hier werden die Segmente zusammengefügt
     segments = []
     for s in unique_stripes:
         pts = points_mm[stripe_idx == s]
@@ -151,7 +155,7 @@ def _segment_stripes(points_mm: np.ndarray, seg_size: float, rotation: float, se
             segments.append(pts)
     return segments
 
-
+# Funktion um Hexagonale zu segmentieren
 def _segment_hexagonal(points_mm: np.ndarray, seg_size: float, seg_order: str):
     """Hexagonale Segmentierung: versetztes Gitter, alternierend Phase A/B."""
     if len(points_mm) == 0:
