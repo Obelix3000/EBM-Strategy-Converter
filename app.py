@@ -97,8 +97,14 @@ def render_strategy_ui() -> dict:
     st.subheader("Stufe 2: Scan-Strategie (innerhalb der Segmente)")
     micro_strategy = st.selectbox(
         "Punkte-Sortierung:",
-        ["Raster (Zick-Zack)", "Spot Consecutive", "Spot Ordered",
-         "Ghost Beam", "Hilbert-Kurve", "Spiral", "Peano-Kurve"]
+        [
+            "Raster (Zick-Zack)", "Spot Consecutive", "Spot Ordered", "Ghost Beam",
+            "Hilbert-Kurve", "Spiral", "Peano-Kurve",
+            "─── Neu ───",
+            "Greedy (Nächster Nachbar)", "Dispersions-Maximum",
+            "Gitter-Dispersion (deterministisch)", "Gitter-Dispersion (stochastisch)",
+            "Dichte-adaptiv", "Verschachtelte Streifen",
+        ]
     )
 
     hatch_spacing = st.number_input("Linien-Abstand / Hatch (µm)", min_value=10.0, value=200.0, step=10.0)
@@ -111,6 +117,11 @@ def render_strategy_ui() -> dict:
     spot_skip = 2
     hilbert_order = 4
     spiral_dir = "inward"
+    greedy_memory = 4
+    greedy_w2 = 0.5
+    grid_cell_size = 3.0
+    interlace_forward = 3
+    interlace_backward = 2
 
     if micro_strategy == "Ghost Beam":
         ghost_lag = st.number_input("Secondary Beam Lag (µm)", min_value=10.0, value=1000.0, step=100.0)
@@ -124,6 +135,27 @@ def render_strategy_ui() -> dict:
         hilbert_order = st.slider("Ordnung (Detailgrad)", 2, 7, 4)
     if micro_strategy == "Spiral":
         spiral_dir = st.radio("Richtung", ["inward", "outward"])
+
+    if micro_strategy in ("Greedy (Nächster Nachbar)", "Dispersions-Maximum"):
+        greedy_memory = st.slider("Gedächtnis (letzte Punkte)", 1, 10, 4)
+        greedy_w2 = st.slider("Rückstoß-Gewicht", 0.0, 2.0, 0.5, step=0.1)
+        if micro_strategy == "Greedy (Nächster Nachbar)":
+            st.info("Minimiert Wegstrecke und meidet kürzlich besuchte Bereiche. Kann bei großen Layers langsam sein.")
+        else:
+            st.info("Maximiert räumliche Streuung – springt bewusst weit, verteilt Wärme gleichmäßig. Kann langsam sein.")
+
+    if micro_strategy in ("Gitter-Dispersion (deterministisch)", "Gitter-Dispersion (stochastisch)", "Dichte-adaptiv"):
+        grid_cell_size = st.number_input("Zellgröße (mm)", min_value=0.5, max_value=20.0, value=3.0, step=0.5)
+        if micro_strategy == "Dichte-adaptiv":
+            st.info("Stochastisch, nicht reproduzierbar. Bevorzugt unterdichte Bereiche.")
+
+    if micro_strategy == "Verschachtelte Streifen":
+        interlace_forward = st.number_input("Vorwärts-Sprung", min_value=1, max_value=20, value=3, step=1)
+        interlace_backward = st.number_input("Rückwärts-Sprung", min_value=1, max_value=20, value=2, step=1)
+        st.info(
+            "Erkennt natürliche Scanstreifen im Input und sortiert sie mit modularem "
+            "Sprungmuster. Funktioniert am besten ohne vorherige Makro-Segmentierung."
+        )
 
     # Punktabstand ist hardcoded (kommt aus dem Slicer, wird nie geändert)
     # point_spacing = 100.0 µm
@@ -140,6 +172,11 @@ def render_strategy_ui() -> dict:
         'spot_skip': spot_skip,
         'hilbert_order': hilbert_order,
         'spiral_direction': spiral_dir,
+        'greedy_memory': greedy_memory,
+        'greedy_w2': greedy_w2,
+        'grid_cell_size': grid_cell_size,
+        'interlace_forward': interlace_forward,
+        'interlace_backward': interlace_backward,
         'point_spacing': 100.0,  # fix
     }
 

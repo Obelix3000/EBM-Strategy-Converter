@@ -262,6 +262,18 @@ def sort_within_segment(points: np.ndarray, params: dict, rotation: float) -> np
         return sort_spiral(points, params)
     elif strategy == 'Peano-Kurve':
         return sort_peano(points, params)
+    elif strategy == 'Greedy (Nächster Nachbar)':
+        return sort_local_greedy(points, params, rotation)
+    elif strategy == 'Dispersions-Maximum':
+        return sort_dispersion_max(points, params, rotation)
+    elif strategy == 'Gitter-Dispersion (deterministisch)':
+        return sort_grid_dispersion(points, params, rotation, stochastic=False)
+    elif strategy == 'Gitter-Dispersion (stochastisch)':
+        return sort_grid_dispersion(points, params, rotation, stochastic=True)
+    elif strategy == 'Dichte-adaptiv':
+        return sort_density_adaptive(points, params, rotation)
+    elif strategy == 'Verschachtelte Streifen':
+        return sort_interlaced_stripes(points, params, rotation)
     return points
 
 
@@ -427,3 +439,367 @@ def sort_peano(points: np.ndarray, params: dict) -> np.ndarray:
     peano_key = iy * n + peano_x
 
     return points[np.argsort(peano_key)]
+
+
+# ---------------------------------------------------------------------------
+# Neue Strategien (portiert und angepasst von FriesslebenA/EBM-Software)
+# ---------------------------------------------------------------------------
+
+def sort_local_greedy(points: np.ndarray, params: dict, rotation: float) -> np.ndarray:
+    """
+    Greedy (Nächster Nachbar):
+    Minimiert den zurückgelegten Weg mit Rückstoßgedächtnis. Bewertet Kandidaten
+    als score = dist_zum_aktuellen - w2 * summe(dist_zu_letzten_N).
+    Nächste Punkte mit Rückstoß auf kürzlich besuchte Bereiche werden bevorzugt.
+    Nutzt KDTree für effiziente Kandidatensuche (scipy).
+    """
+    from scipy.spatial import KDTree
+
+    N = len(points)
+    if N <= 1:
+        return points
+
+    memory = max(1, int(params.get('greedy_memory', 4)))
+    w2 = float(params.get('greedy_w2', 0.5))
+    K = max(memory * 6, 48)
+
+    tree = KDTree(points)
+    visited = np.zeros(N, dtype=bool)
+    order = np.empty(N, dtype=int)
+    order[0] = 0
+    visited[0] = True
+    recent = [0]
+
+    for step in range(1, N):
+        current = points[order[step - 1]]
+        k_query = min(K, N)
+        while True:
+            _, neighbors = tree.query(current, k=k_query)
+            neighbors = np.atleast_1d(neighbors)
+            unvisited = neighbors[~visited[neighbors]]
+            if len(unvisited) > 0 or k_query >= N:
+                break
+            k_query = min(k_query * 2, N)
+
+        if len(unvisited) == 0:
+            unvisited = np.where(~visited)[0][:1]
+
+        cand_pts = points[unvisited]
+        cand_dists = np.linalg.norm(cand_pts - current, axis=1)
+        repulsion = np.zeros(len(unvisited))
+        for r_idx in recent[-memory:]:
+            repulsion += np.linalg.norm(cand_pts - points[r_idx], axis=1)
+
+        best = int(np.argmin(cand_dists - w2 * repulsion))
+        chosen = int(unvisited[best])
+        order[step] = chosen
+        visited[chosen] = True
+        recent.append(chosen)
+
+    return points[order]
+
+
+def sort_dispersion_max(points: np.ndarray, params: dict, rotation: float) -> np.ndarray:
+    """
+    Dispersions-Maximum:
+    Maximiert die räumliche Verteilung durch Auswahl möglichst weit entfernter
+    Punkte. Bewertet Kandidaten als score = dist_zum_aktuellen + w2 * summe(dist_zu_letzten_N).
+    Kandidatenpool: die K weitesten unbesuchten Punkte. Verteilt Wärme über die Fläche.
+    Nutzt KDTree (scipy).
+    """
+    from scipy.spatial import KDTree
+
+    N = len(points)
+    if N <= 1:
+        return points
+
+    memory = max(1, int(params.get('greedy_memory', 4)))
+    w2 = float(params.get('greedy_w2', 0.5))
+    K = max(memory * 6, 48)
+
+    tree = KDTree(points)
+    visited = np.zeros(N, dtype=bool)
+    order = np.empty(N, dtype=int)
+    order[0] = 0
+    visited[0] = True
+    recent = [0]
+
+    for step in range(1, N):
+        current = points[order[step - 1]]
+        unvisited_idx = np.where(~visited)[0]
+        unvisited_pts = points[unvisited_idx]
+
+        dists = np.linalg.norm(unvisited_pts - current, axis=1)
+
+        # Kandidatenpool: die K weitesten Punkte
+        if len(unvisited_idx) > K:
+            cand_local = np.argpartition(dists, -K)[-K:]
+        else:
+            cand_local = np.arange(len(unvisited_idx))
+
+        cand_global = unvisited_idx[cand_local]
+        cand_pts = points[cand_global]
+        cand_dists = dists[cand_local]
+
+        spread = np.zeros(len(cand_local))
+        for r_idx in recent[-memory:]:
+            spread += np.linalg.norm(cand_pts - points[r_idx], axis=1)
+
+        best = int(np.argmax(cand_dists + w2 * spread))
+        chosen = int(cand_global[best])
+        order[step] = chosen
+        visited[chosen] = True
+        recent.append(chosen)
+
+    return points[order]
+
+
+def sort_grid_dispersion(points: np.ndarray, params: dict, rotation: float,
+                         stochastic: bool = False) -> np.ndarray:
+    """
+    Gitter-Dispersion (deterministisch / stochastisch):
+    Punkte werden Gitterzellen zugewiesen. Zellen werden in Schlangenlinienreihenfolge
+    (Boustrophedon) abgearbeitet. Innerhalb jeder Zelle wird der Kandidat mit dem
+    höchsten gewichteten Abstand zur Verlaufshistorie gewählt (age_decay=0.9).
+    Im stochastischen Modus: zufällige Stichprobe aus Zellkandidaten.
+    """
+    from collections import defaultdict
+
+    N = len(points)
+    if N <= 1:
+        return points
+
+    cell_size = float(params.get('grid_cell_size', 3.0))
+    age_decay = 0.9
+    recent_mem = 20
+    candidate_limit = 64
+    rng = np.random.default_rng(42) if stochastic else None
+
+    minx, miny = points[:, 0].min(), points[:, 1].min()
+    cx_arr = np.floor((points[:, 0] - minx) / cell_size).astype(int)
+    cy_arr = np.floor((points[:, 1] - miny) / cell_size).astype(int)
+
+    # Zelle → Punktmenge aufbauen
+    cell_pts: dict = defaultdict(list)
+    for i in range(N):
+        cell_pts[(int(cx_arr[i]), int(cy_arr[i]))].append(i)
+
+    # Schlangenlinienreihenfolge der Zellen (nach Y-Zeilen, abwechselnd X-Richtung)
+    rows: dict = defaultdict(list)
+    for (gx, gy) in cell_pts:
+        rows[gy].append(gx)
+
+    cell_order = []
+    for gy in sorted(rows):
+        gxs = sorted(rows[gy])
+        if gy % 2 == 1:
+            gxs = gxs[::-1]
+        for gx in gxs:
+            cell_order.append((gx, gy))
+
+    remaining = {cell: set(pts) for cell, pts in cell_pts.items()}
+    order: list = []
+    recent: list = []
+
+    for cell in cell_order:
+        cell_set = remaining.get(cell, set())
+        while cell_set:
+            pool = list(cell_set)
+            if stochastic and len(pool) > candidate_limit:
+                pool = [pool[i] for i in rng.choice(len(pool), candidate_limit, replace=False)]
+            else:
+                pool = pool[:candidate_limit]
+
+            if not recent:
+                chosen = pool[0]
+            else:
+                cand_pts = points[pool]
+                scores = np.zeros(len(pool))
+                for age, r_idx in enumerate(reversed(recent[-recent_mem:])):
+                    scores += (age_decay ** age) * np.linalg.norm(cand_pts - points[r_idx], axis=1)
+                chosen = pool[int(np.argmax(scores))]
+
+            order.append(chosen)
+            recent.append(chosen)
+            cell_set.discard(chosen)
+
+    return points[order]
+
+
+def sort_density_adaptive(points: np.ndarray, params: dict, rotation: float) -> np.ndarray:
+    """
+    Dichte-adaptiv (stochastisch):
+    Wählt bei jedem Schritt eine Zelle stochastisch gewichtet nach Zelldichte und
+    Abstand zur letzten Aktivität. Innerhalb der Zelle wird der Punkt nach gewichtetem
+    Abstand zur Verlaufshistorie ausgewählt. Verteilt Wärme adaptiv, nicht reproduzierbar.
+    """
+    from collections import defaultdict
+
+    N = len(points)
+    if N <= 1:
+        return points
+
+    cell_size = float(params.get('grid_cell_size', 3.0))
+    age_decay = 0.9
+    recent_mem = 16
+    candidate_limit = 64
+    pool_limit = 128
+    rng = np.random.default_rng(None)  # bewusst nicht deterministisch
+
+    minx, miny = points[:, 0].min(), points[:, 1].min()
+    cx_arr = np.floor((points[:, 0] - minx) / cell_size).astype(int)
+    cy_arr = np.floor((points[:, 1] - miny) / cell_size).astype(int)
+
+    cell_pts: dict = defaultdict(list)
+    for i in range(N):
+        cell_pts[(int(cx_arr[i]), int(cy_arr[i]))].append(i)
+
+    remaining = {cell: set(pts) for cell, pts in cell_pts.items()}
+    active_cells = set(remaining.keys())
+    order: list = []
+    recent: list = []
+
+    def _cell_center(cell):
+        return np.array([minx + cell[0] * cell_size + cell_size / 2,
+                         miny + cell[1] * cell_size + cell_size / 2])
+
+    def _local_density(cell):
+        gx, gy = cell
+        return sum(len(remaining.get((gx + dx, gy + dy), set()))
+                   for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+
+    while active_cells:
+        pool_cells = list(active_cells)
+        if len(pool_cells) > pool_limit:
+            pool_cells = [pool_cells[i]
+                          for i in rng.choice(len(pool_cells), pool_limit, replace=False)]
+
+        weights = np.empty(len(pool_cells))
+        last_pt = points[recent[-1]] if recent else None
+        for j, cell in enumerate(pool_cells):
+            density = _local_density(cell)
+            if last_pt is not None:
+                spacing = float(np.linalg.norm(_cell_center(cell) - last_pt))
+            else:
+                spacing = cell_size * 2.0
+            weights[j] = ((spacing + cell_size * 0.35) ** 2) / (1.0 + np.sqrt(max(density, 1)))
+
+        weights = np.clip(weights, 1e-12, None)
+        weights /= weights.sum()
+        chosen_cell = pool_cells[int(rng.choice(len(pool_cells), p=weights))]
+
+        cell_pool = list(remaining[chosen_cell])
+        if len(cell_pool) > candidate_limit:
+            cell_pool = [cell_pool[i]
+                         for i in rng.choice(len(cell_pool), candidate_limit, replace=False)]
+
+        if not recent:
+            chosen_pt = cell_pool[0]
+        else:
+            cand_pts = points[cell_pool]
+            pt_weights = np.zeros(len(cell_pool))
+            for age, r_idx in enumerate(reversed(recent[-recent_mem:])):
+                pt_weights += (age_decay ** age) * np.linalg.norm(cand_pts - points[r_idx], axis=1)
+            pt_weights = np.clip(pt_weights, 1e-12, None)
+            pt_weights /= pt_weights.sum()
+            chosen_pt = cell_pool[int(rng.choice(len(cell_pool), p=pt_weights))]
+
+        order.append(chosen_pt)
+        recent.append(chosen_pt)
+        remaining[chosen_cell].discard(chosen_pt)
+        if not remaining[chosen_cell]:
+            active_cells.discard(chosen_cell)
+
+    return points[order]
+
+
+def sort_interlaced_stripes(points: np.ndarray, params: dict, rotation: float) -> np.ndarray:
+    """
+    Verschachtelte Streifen:
+    Erkennt natürliche Scan-Streifen anhand großer Rückwärtssprünge im Input
+    (die der Slicer bei Zeilenwechseln erzeugt). Innerhalb jedes Streifens wird
+    die Besuchsreihenfolge durch ein modulares Sprungmuster umgeordnet, das einen
+    verschachtelten Vorwärts-Rückwärts-Gang erzeugt.
+    Beispiel mit forward=3, backward=2 (block_size=5):
+      Originalblock [0,1,2,3,4] → Reihenfolge [0,3,1,4,2].
+    """
+    N = len(points)
+    if N <= 2:
+        return points
+
+    forward_jump = max(1, int(params.get('interlace_forward', 3)))
+    backward_jump = max(1, int(params.get('interlace_backward', 2)))
+
+    stripe_ranges = _detect_stripe_ranges(points)
+
+    result_indices = []
+    for start, end in stripe_ranges:
+        stripe_idx = list(range(start, end + 1))
+        result_indices.extend(_interlaced_block_reorder(stripe_idx, forward_jump, backward_jump))
+
+    return points[result_indices]
+
+
+def _detect_stripe_ranges(points: np.ndarray) -> list:
+    """
+    Erkennt Streifengrenzen anhand großer Rückwärtssprünge in der dominanten Achse.
+    Schwellwert = max(5 × medianer Vorwärtsschritt, 2 % der Achsenspanne).
+    Gibt Liste von (start_idx, end_idx)-Tupeln zurück.
+    """
+    N = len(points)
+    if N <= 1:
+        return [(0, N - 1)]
+
+    deltas = points[1:] - points[:-1]
+    dx, dy = deltas[:, 0], deltas[:, 1]
+
+    scan_deltas = dx if np.sum(np.abs(dx)) >= np.sum(np.abs(dy)) else dy
+    scan_axis = 0 if np.sum(np.abs(dx)) >= np.sum(np.abs(dy)) else 1
+
+    nonzero = scan_deltas[np.abs(scan_deltas) > 1e-12]
+    if len(nonzero) == 0:
+        return [(0, N - 1)]
+
+    forward_sign = 1.0 if float(np.median(nonzero)) >= 0.0 else -1.0
+    forward_steps = np.abs(nonzero[nonzero * forward_sign > 0.0])
+    median_step = float(np.median(forward_steps)) if len(forward_steps) > 0 else float(np.median(np.abs(nonzero)))
+
+    axis_span = points[:, scan_axis].max() - points[:, scan_axis].min()
+    reset_threshold = max(5.0 * median_step, 0.02 * axis_span, 1e-12)
+
+    stripes = []
+    stripe_start = 0
+    for i, delta in enumerate(scan_deltas):
+        if delta * forward_sign < 0.0 and abs(delta) >= reset_threshold:
+            stripes.append((stripe_start, i))
+            stripe_start = i + 1
+    stripes.append((stripe_start, N - 1))
+    return stripes
+
+
+def _interlaced_block_reorder(stripe_idx: list, forward_jump: int, backward_jump: int) -> list:
+    """Wendet das modulare Sprungmuster blockweise auf einen Streifen an."""
+    block_size = forward_jump + backward_jump
+    full_order = _build_modular_order(block_size, forward_jump)
+    result = []
+    for block_start in range(0, len(stripe_idx), block_size):
+        block = stripe_idx[block_start:block_start + block_size]
+        filtered = [pos for pos in full_order if pos < len(block)]
+        result.extend(block[pos] for pos in filtered)
+    return result
+
+
+def _build_modular_order(block_size: int, forward_jump: int) -> list:
+    """Baut die deterministische modulare Besuchsreihenfolge für einen Block auf.
+    Startet bei 0, springt jeweils um forward_jump (mod block_size) weiter."""
+    seen: set = set()
+    order: list = []
+    for start in range(block_size):
+        if start in seen:
+            continue
+        cur = start
+        while cur not in seen:
+            seen.add(cur)
+            order.append(cur)
+            cur = (cur + forward_jump) % block_size
+    return order

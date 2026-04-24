@@ -2,3 +2,4 @@ streamlit
 shapely
 plotly
 numpy
+scipy
