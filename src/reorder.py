@@ -81,11 +81,12 @@ def segment_points(points_mm: np.ndarray, polygon, params: dict, rotation: float
     seg_type = params.get('segmentation', 'Keine Segmentierung')
     seg_size = params.get('seg_size', 5.0)
     seg_order = params.get('seg_order', 'Schachbrett (schwarz→weiß)')
+    overlap_mm = params.get('seg_overlap', 0.0) / 1000.0  # µm → mm
 
     if 'Schachbrett' in seg_type:
-        return _segment_chessboard(points_mm, seg_size, seg_order)
+        return _segment_chessboard(points_mm, seg_size, seg_order, overlap_mm)
     elif 'Streifen' in seg_type:
-        return _segment_stripes(points_mm, seg_size, rotation, seg_order)
+        return _segment_stripes(points_mm, seg_size, rotation, seg_order, overlap_mm)
     elif 'Hexagonal' in seg_type:
         return _segment_hexagonal(points_mm, seg_size, seg_order)
     elif 'Spiralzonen' in seg_type or 'Konzentrisch' in seg_type:
@@ -93,41 +94,48 @@ def segment_points(points_mm: np.ndarray, polygon, params: dict, rotation: float
     return [points_mm]
 
 # Funktion um das Schachbrett zu segmentieren
-def _segment_chessboard(points_mm: np.ndarray, seg_size: float, seg_order: str):
-    """Schachbrett-Segmentierung: erst Phase A ((row+col)%2==0), dann Phase B."""
+def _segment_chessboard(points_mm: np.ndarray, seg_size: float, seg_order: str, overlap_mm: float = 0.0):
+    """Schachbrett-Segmentierung: erst Phase A ((row+col)%2==0), dann Phase B.
+    Mit overlap_mm > 0 werden Randpunkte beider angrenzender Zellen zugewiesen (Punkte können doppelt vorkommen)."""
     if len(points_mm) == 0:
         return []
 
     minx = points_mm[:, 0].min()
     miny = points_mm[:, 1].min()
+    x_rel = points_mm[:, 0] - minx
+    y_rel = points_mm[:, 1] - miny
+    half_ov = overlap_mm / 2.0
 
-    col_idx = ((points_mm[:, 0] - minx) / seg_size).astype(int)
-    row_idx = ((points_mm[:, 1] - miny) / seg_size).astype(int)
+    col_idx = (x_rel / seg_size).astype(int)
+    row_idx = (y_rel / seg_size).astype(int)
 
     cell_keys = np.stack([row_idx, col_idx], axis=1)  # (N, 2)
     unique_cells = list(set(map(tuple, cell_keys.tolist())))
 
-    # Hier werden die Phasen A und B definiert, welche die zellen beschreiben, die in dieser Phase abgearbeitet werden
     phase_a = [(r, c) for (r, c) in unique_cells if (r + c) % 2 == 0]
     phase_b = [(r, c) for (r, c) in unique_cells if (r + c) % 2 == 1]
-
-    #Hier werden die Phasen A und B sortiert 
     phase_a = _order_cells(phase_a, seg_order)
     phase_b = _order_cells(phase_b, seg_order)
     ordered = phase_a + phase_b
 
-    # Hier werden die Segmente zusammengefügt
     segments = []
     for (r, c) in ordered:
-        mask = (row_idx == r) & (col_idx == c)
+        if half_ov <= 0.0:
+            mask = (row_idx == r) & (col_idx == c)
+        else:
+            mask = (
+                (x_rel >= c * seg_size - half_ov) & (x_rel < (c + 1) * seg_size + half_ov) &
+                (y_rel >= r * seg_size - half_ov) & (y_rel < (r + 1) * seg_size + half_ov)
+            )
         pts = points_mm[mask]
         if len(pts) > 0:
             segments.append(pts)
     return segments
 
 # Funktion um Streifen zu segmentieren
-def _segment_stripes(points_mm: np.ndarray, seg_size: float, rotation: float, seg_order: str):
-    """Streifen-Segmentierung: parallele Bänder senkrecht zur aktuellen Hatch-Richtung."""
+def _segment_stripes(points_mm: np.ndarray, seg_size: float, rotation: float, seg_order: str, overlap_mm: float = 0.0):
+    """Streifen-Segmentierung: parallele Bänder senkrecht zur aktuellen Hatch-Richtung.
+    Mit overlap_mm > 0 werden Randpunkte beider angrenzender Streifen zugewiesen (Punkte können doppelt vorkommen)."""
     if len(points_mm) == 0:
         return []
 
@@ -135,11 +143,13 @@ def _segment_stripes(points_mm: np.ndarray, seg_size: float, rotation: float, se
     sin_r = np.sin(np.radians(rotation))
     cx, cy = points_mm.mean(axis=0)
     rel = points_mm - [cx, cy]
-    # Projektion auf die Richtung senkrecht zum Hatch-Vektor
     rot_y = rel[:, 0] * sin_r + rel[:, 1] * cos_r
 
     miny = rot_y.min()
-    stripe_idx = ((rot_y - miny) / seg_size).astype(int)
+    rot_y_rel = rot_y - miny
+    half_ov = overlap_mm / 2.0
+
+    stripe_idx = (rot_y_rel / seg_size).astype(int)
     unique_stripes = sorted(set(stripe_idx.tolist()))
 
     if 'Zufällig' in seg_order:
@@ -147,10 +157,13 @@ def _segment_stripes(points_mm: np.ndarray, seg_size: float, rotation: float, se
         unique_stripes = list(unique_stripes)
         rng.shuffle(unique_stripes)
 
-    # Hier werden die Segmente zusammengefügt
     segments = []
     for s in unique_stripes:
-        pts = points_mm[stripe_idx == s]
+        if half_ov <= 0.0:
+            mask = stripe_idx == s
+        else:
+            mask = (rot_y_rel >= s * seg_size - half_ov) & (rot_y_rel < (s + 1) * seg_size + half_ov)
+        pts = points_mm[mask]
         if len(pts) > 0:
             segments.append(pts)
     return segments
