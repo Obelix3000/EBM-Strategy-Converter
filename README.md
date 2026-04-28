@@ -6,41 +6,47 @@ Werkzeug zur Neuanordnung von Elektronenstrahl-Belichtungsstrategien für den **
 
 ---
 
-## ▶️ Schnellstart (Empfohlen)
+## 🚀 Installation & Start
 
-**Doppelklick auf `Start App.bat`** im Projektordner.
+### Schritt 1 – Python installieren (einmalig)
 
-Die Batch-Datei:
-1. Aktiviert automatisch das virtuelle Python-Environment (`.venv`)
-2. Startet den Streamlit-Server
-3. Öffnet die App im Standard-Browser unter `http://localhost:8501`
+1. Gehe auf **https://www.python.org/downloads/** und lade die neueste Python-Version herunter.
+2. Starte den Installer.
+3. **Wichtig:** Setze ganz unten im Installer-Fenster das Häkchen bei **„Add Python to PATH"**, bevor du auf „Install Now" klickst.
 
-> **Hinweis:** Das schwarze Terminal-Fenster muss geöffnet bleiben, solange die App läuft – es kann aber minimiert werden. Beim Schließen des Fensters wird die App beendet.
+   ![Python PATH Häkchen](https://docs.python.org/3/_images/win_installer.png)
 
-> **Windows-Sicherheitswarnung:** Beim ersten Start fragt Windows möglicherweise nach Bestätigung → „Trotzdem ausführen" klicken.
+4. Installation abschließen.
+
+> **Einmal reicht:** Wenn Python bereits installiert ist, diesen Schritt überspringen.
 
 ---
 
-## 🔧 Installation (Erstmalige Einrichtung)
+### Schritt 2 – App starten (jetzt und in Zukunft)
 
-Falls das virtuelle Environment noch nicht existiert:
+**Doppelklick auf `Start App.bat`** im Projektordner.
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
+Das Skript erledigt beim **ersten Start** automatisch alles Weitere:
+1. Erstellt eine isolierte Python-Umgebung (`.venv`) im Projektordner
+2. Lädt alle benötigten Bibliotheken herunter und installiert sie
+3. Prüft, ob eine neuere Programmversion verfügbar ist (erfordert Internetzugang)
+4. Startet die App und öffnet sie im Browser unter `http://localhost:8501`
 
-Danach reicht dauerhaft ein Doppelklick auf `Start App.bat`.
+Der erste Start dauert ein paar Minuten (Bibliotheken werden heruntergeladen). Alle weiteren Starts sind deutlich schneller.
 
-### Alternativ: Manueller Start über Terminal
+> **Das schwarze Terminal-Fenster** muss geöffnet bleiben, solange die App läuft – es kann aber minimiert werden. Beim Schließen des Fensters wird die App beendet.
 
-```bash
-.venv\Scripts\activate
-streamlit run app.py
-```
+> **Windows-Sicherheitswarnung:** Beim ersten Start fragt Windows möglicherweise nach Bestätigung → „Weitere Informationen" → „Trotzdem ausführen" klicken.
 
-Die App öffnet sich automatisch im Browser unter `http://localhost:8501`.
+---
+
+### Problemlösung
+
+| Problem | Lösung |
+|---|---|
+| „Python nicht gefunden" | Schritt 1 wiederholen und darauf achten, dass **„Add Python to PATH"** aktiviert ist |
+| Browser öffnet sich nicht | Manuell `http://localhost:8501` in die Adressleiste eingeben |
+| App startet nicht | Terminal-Fenster nach Fehlermeldungen durchsuchen und ggf. Internetzugang prüfen |
 
 ---
 
