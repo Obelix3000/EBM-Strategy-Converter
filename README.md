@@ -40,6 +40,22 @@ Der erste Start dauert ein paar Minuten (Bibliotheken werden heruntergeladen). A
 
 ---
 
+### Desktop-App starten (neu)
+
+Die Desktop-Version nutzt PySide6 und eine 3D-Vorschau. Sie startet lokal ohne Browser.
+
+**Option A (empfohlen):** Doppelklick auf `Start Desktop.bat`
+
+**Option B (manuell):**
+
+```bash
+python desktop_app.py
+```
+
+> Hinweis: Beim ersten Start werden die zusätzlichen Abhängigkeiten (PySide6, VisPy, PyOpenGL) installiert.
+
+---
+
 ### Problemlösung
 
 | Problem | Lösung |
@@ -141,7 +157,9 @@ Die Software erkennt Infill-Dateien anhand der **vorletzten Ziffer** vor `.B99` 
 ```
 EBM-Strategy-Software/
 ├── Start App.bat          # ▶ Schnellstart per Doppelklick
+├── Start Desktop.bat      # ▶ Desktop-Version (PySide6)
 ├── app.py                 # Haupt-Streamlit-Anwendung
+├── desktop_app.py         # Desktop-UI mit 3D-Vorschau
 ├── requirements.txt       # Python-Abhängigkeiten
 ├── src/
 │   ├── parser.py          # B99-Datei-Parser
@@ -163,3 +181,14 @@ EBM-Strategy-Software/
 | **NumPy** | Vektorisierte Punkt-Sortierung (tausende Punkte pro Schicht) |
 | **Shapely** | Konvexe Hülle für Segmentierungsalgorithmen |
 | **Plotly** | Interaktive 2D-Visualisierung mit Zoom und Hover |
+| **PySide6 + VisPy** | Desktop-UI und 3D-Vorschau |
+
+---
+
+## EXE Build (Windows)
+
+```bash
+pyinstaller --noconfirm --onefile --name EBM-Strategy-Desktop --collect-all vispy desktop_app.py
+```
+
+Der erzeugte Build liegt danach unter `dist/EBM-Strategy-Desktop.exe`.

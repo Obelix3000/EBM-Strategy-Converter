@@ -3,3 +3,7 @@ shapely
 plotly
 numpy
 scipy
+pyside6
+vispy
+PyOpenGL
+pyinstaller
