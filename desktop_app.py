@@ -8,11 +8,26 @@ from shapely.geometry import MultiPoint
 from vispy import color, scene
 
 from src.pipeline import ZipSession, export_zip, process_infill_files, read_points_mm
-from src.reorder import reorder_points
+from src.reorder import reorder_points, segment_points
 
 
 BUILD_PLATE_HALF_MM = 60.0
 LAYER_HEIGHT_MM = 0.08
+
+
+def _detect_overlap_points(points_mm: np.ndarray, params: dict, layer_idx: int) -> np.ndarray:
+    """Gibt boolean-Array zurück: True = Punkt liegt in Überlappungszone (erscheint in >1 Segment)."""
+    polygon = MultiPoint(points_mm).convex_hull
+    rotation = (layer_idx * params.get("rotation_angle_deg", 0.0)) % 360.0
+    segments = segment_points(points_mm, polygon, params, rotation)
+    count = np.zeros(len(points_mm), dtype=np.int32)
+    key_to_idx = {(round(float(x), 4), round(float(y), 4)): i for i, (x, y) in enumerate(points_mm)}
+    for seg in segments:
+        for x, y in seg:
+            k = (round(float(x), 4), round(float(y), 4))
+            if k in key_to_idx:
+                count[key_to_idx[k]] += 1
+    return count > 1
 
 
 class WorkerSignals(QtCore.QObject):
@@ -65,6 +80,8 @@ class PreviewCanvas(QtWidgets.QWidget):
         self.boundary_visual = scene.visuals.Line(parent=self.view.scene, method="gl")
         self.points_visual = scene.visuals.Markers(parent=self.view.scene)
         self.path_visual = scene.visuals.Line(parent=self.view.scene, method="gl")
+        self.sim_hot_visual = scene.visuals.Markers(parent=self.view.scene)
+        self.sim_hot_visual.visible = False
 
         self._init_build_plate()
 
@@ -122,6 +139,29 @@ class PreviewCanvas(QtWidgets.QWidget):
 
         self.canvas.update()
 
+    def update_sim(
+        self,
+        all_xyz: np.ndarray,
+        all_colors: np.ndarray,
+        hot_xyz: Optional[np.ndarray],
+    ) -> None:
+        if all_xyz.size == 0:
+            self.points_visual.set_data(pos=np.zeros((0, 3), dtype=np.float32))
+        else:
+            self.points_visual.set_data(pos=all_xyz, face_color=all_colors, size=3)
+        self.points_visual.visible = True
+        self.path_visual.visible = False
+        if hot_xyz is not None and hot_xyz.size > 0:
+            self.sim_hot_visual.set_data(
+                pos=hot_xyz.reshape(1, 3),
+                face_color=np.array([[1.0, 1.0, 0.85, 1.0]], dtype=np.float32),
+                size=10,
+            )
+            self.sim_hot_visual.visible = True
+        else:
+            self.sim_hot_visual.visible = False
+        self.canvas.update()
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
@@ -137,6 +177,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_pending = False
         self.layer_order = []
         self.layer_index_map = {}
+
+        self.sim_timer = QtCore.QTimer(self)
+        self.sim_timer.timeout.connect(self._sim_step)
+        self.sim_points_xyz: Optional[np.ndarray] = None
+        self.sim_running: bool = False
+        self.sim_index: int = 0
 
         self.preview_canvas = PreviewCanvas()
 
@@ -155,6 +201,7 @@ class MainWindow(QtWidgets.QMainWindow):
         panel_layout.addWidget(self._build_file_group())
         panel_layout.addWidget(self._build_preview_group())
         panel_layout.addWidget(self._build_strategy_group())
+        panel_layout.addWidget(self._build_simulation_group())
         panel_layout.addWidget(self._build_export_group())
         panel_layout.addStretch(1)
 
@@ -315,6 +362,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rotation_spin.setRange(0.0, 360.0)
         self.rotation_spin.setValue(67.0)
         self.rotation_spin.setSingleStep(1.0)
+        self.rotation_spin.setToolTip(
+            "Wird pro Schicht (sequentiell 0, 1, 2 …) multipliziert.\n"
+            "Schicht N → N × Winkel mod 360°.\n"
+            "Bei Raster ohne Segmentierung hat Rotation keinen Effekt."
+        )
 
         self.ghost_lag_spin = QtWidgets.QDoubleSpinBox()
         self.ghost_lag_spin.setRange(10.0, 10000.0)
@@ -364,6 +416,18 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addRow("Mikro-Strategie", self.micro_combo)
         layout.addRow("Linien-Abstand (um)", self.hatch_spacing_spin)
         layout.addRow("Rotation pro Layer (grad)", self.rotation_spin)
+        self.rotation_info_label = QtWidgets.QLabel("Rotation dieser Schicht: –")
+        self.rotation_info_label.setStyleSheet("color: #aaaaff; font-size: 10px;")
+        layout.addRow("", self.rotation_info_label)
+        self.rotation_warning_label = QtWidgets.QLabel(
+            "⚠ Rotation hat keinen Effekt bei Raster ohne Segmentierung"
+        )
+        self.rotation_warning_label.setStyleSheet(
+            "color: #ffaa44; font-style: italic; font-size: 10px;"
+        )
+        self.rotation_warning_label.setWordWrap(True)
+        self.rotation_warning_label.setVisible(False)
+        layout.addRow("", self.rotation_warning_label)
         self.ghost_lag_label = QtWidgets.QLabel("Ghost Beam Lag (um)")
         self.spot_skip_label = QtWidgets.QLabel("Spot Skip")
         self.hilbert_order_label = QtWidgets.QLabel("Hilbert/Peano Ordnung")
@@ -384,6 +448,43 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addRow(self.interlace_backward_label, self.interlace_backward_spin)
 
         self._update_strategy_controls()
+        return group
+
+    def _build_simulation_group(self) -> QtWidgets.QGroupBox:
+        group = QtWidgets.QGroupBox("Simulation")
+        layout = QtWidgets.QVBoxLayout(group)
+
+        self.sim_button = QtWidgets.QPushButton("▶ Simulieren")
+        self.sim_button.setEnabled(False)
+
+        dwell_row = QtWidgets.QHBoxLayout()
+        self.sim_dwell_spin = QtWidgets.QSpinBox()
+        self.sim_dwell_spin.setRange(1, 1_000_000)
+        self.sim_dwell_spin.setSingleStep(1)
+        self.sim_dwell_spin.setValue(13)
+        self.sim_dwell_spin.setSuffix(" µs")
+        self.sim_dwell_spin.setToolTip(
+            "Verweildauer pro Punkt in Mikrosekunden.\n"
+            "Realistische EBM-Haltezeit: 13 µs.\n"
+            "Animationsgeschwindigkeit: max(10 ms, Wert / 1000) pro Punkt."
+        )
+        dwell_row.addWidget(QtWidgets.QLabel("µs / Punkt:"))
+        dwell_row.addWidget(self.sim_dwell_spin)
+
+        decay_row = QtWidgets.QHBoxLayout()
+        self.sim_decay_spin = QtWidgets.QSpinBox()
+        self.sim_decay_spin.setRange(5, 300)
+        self.sim_decay_spin.setSingleStep(5)
+        self.sim_decay_spin.setValue(60)
+        decay_row.addWidget(QtWidgets.QLabel("Abklingpunkte:"))
+        decay_row.addWidget(self.sim_decay_spin)
+
+        self.sim_progress_label = QtWidgets.QLabel("Fortschritt: –")
+
+        layout.addWidget(self.sim_button)
+        layout.addLayout(dwell_row)
+        layout.addLayout(decay_row)
+        layout.addWidget(self.sim_progress_label)
         return group
 
     def _build_export_group(self) -> QtWidgets.QGroupBox:
@@ -429,6 +530,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.interlace_forward_spin.valueChanged.connect(self._request_preview)
         self.interlace_backward_spin.valueChanged.connect(self._request_preview)
         self.export_button.clicked.connect(self._run_export)
+        self.sim_button.clicked.connect(self._toggle_simulation)
+        self.sim_dwell_spin.valueChanged.connect(self._on_dwell_changed)
 
     def _choose_output_dir(self) -> None:
         directory = QtWidgets.QFileDialog.getExistingDirectory(self, "Ausgabeordner waehlen")
@@ -601,6 +704,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_row_visible(self.seg_overlap_label, self.seg_overlap_spin, enable_seg)
         self._set_row_visible(self.seg_order_label, self.seg_order_combo, enable_seg)
 
+        is_raster_no_seg = (
+            micro in ("Raster (Zick-Zack)", "Spot Consecutive")
+            and seg == "Keine Segmentierung"
+        )
+        self.rotation_warning_label.setVisible(is_raster_no_seg)
+
     def _collect_params(self) -> dict:
         return {
             "segmentation": self.segmentation_combo.currentText(),
@@ -622,7 +731,159 @@ class MainWindow(QtWidgets.QMainWindow):
             "point_spacing": 100.0,
         }
 
+    def _toggle_simulation(self) -> None:
+        if self.sim_running:
+            self._stop_simulation()
+        else:
+            self._start_simulation()
+
+    def _start_simulation(self) -> None:
+        if not self.session or not self.session.infill_files:
+            return
+        self.sim_timer.stop()
+        self.sim_running = False
+        self.sim_button.setEnabled(False)
+        self.sim_progress_label.setText("Lade Schichtdaten…")
+
+        info = self.session.infill_files[self.current_preview_index]
+        params = self._collect_params()
+        should_reorder = (
+            self.reordered_check.isChecked()
+            and info.classification in ("infill_even", "infill_9")
+            and info.layer >= self.session.cutoff_layer
+        )
+        sel_layer = self._preview_layer_key(info.filename)
+        layer_seq_idx = self.layer_index_map.get(sel_layer, 0)
+        z_val = float(layer_seq_idx) * LAYER_HEIGHT_MM
+
+        worker = Worker(self._load_sim_data, info, params, should_reorder, z_val)
+        worker.signals.result.connect(self._apply_sim_data)
+        worker.signals.error.connect(
+            lambda msg: self.status_bar.showMessage(f"Sim-Fehler: {msg}")
+        )
+        self.thread_pool.start(worker)
+
+    @staticmethod
+    def _load_sim_data(info, params: dict, should_reorder: bool, z_val: float) -> np.ndarray:
+        pts = read_points_mm(info.path)
+        if pts.size == 0:
+            return np.zeros((0, 3), dtype=np.float32)
+        if should_reorder:
+            pts = reorder_points(pts, params, info.layer)
+        N = len(pts)
+        z_col = np.full((N, 1), z_val, dtype=np.float32)
+        return np.hstack([pts.astype(np.float32), z_col])
+
+    def _apply_sim_data(self, sim_xyz: np.ndarray) -> None:
+        SIM_MAX = 15_000
+        if sim_xyz.size == 0:
+            self.status_bar.showMessage("Keine Punkte in dieser Schicht")
+            self.sim_button.setEnabled(True)
+            self.sim_progress_label.setText("Fortschritt: –")
+            return
+        if len(sim_xyz) > SIM_MAX:
+            self.status_bar.showMessage(
+                f"Hinweis: {len(sim_xyz)} Punkte – Simulation auf {SIM_MAX} begrenzt"
+            )
+            sim_xyz = sim_xyz[:SIM_MAX]
+        self.sim_points_xyz = sim_xyz
+        self.sim_index = 0
+        self.sim_running = True
+        self.sim_button.setText("⏹ Stopp")
+        self.sim_button.setEnabled(True)
+        N = len(sim_xyz)
+        self.sim_progress_label.setText(f"Fortschritt: 0 / {N}")
+        self.sim_timer.start(max(10, int(self.sim_dwell_spin.value()) // 1000))
+
+    def _stop_simulation(self) -> None:
+        self.sim_timer.stop()
+        self.sim_running = False
+        self.sim_points_xyz = None
+        self.sim_index = 0
+        self.sim_button.setText("▶ Simulieren")
+        self.sim_button.setEnabled(bool(self.session and self.session.infill_files))
+        self.sim_progress_label.setText("Fortschritt: –")
+        self.preview_canvas.sim_hot_visual.visible = False
+        self.preview_canvas.canvas.update()
+        self._request_preview()
+
+    def _on_dwell_changed(self, value: int) -> None:
+        if self.sim_running and self.sim_timer.isActive():
+            self.sim_timer.setInterval(max(10, value // 1000))
+
+    def _sim_step(self) -> None:
+        if self.sim_points_xyz is None:
+            self._stop_simulation()
+            return
+        N = len(self.sim_points_xyz)
+        idx = self.sim_index
+        if idx >= N:
+            self._stop_simulation()
+            return
+        decay = int(self.sim_decay_spin.value())
+        colors = self._compute_sim_colors(N, idx, decay)
+        self.preview_canvas.update_sim(
+            all_xyz=self.sim_points_xyz,
+            all_colors=colors,
+            hot_xyz=self.sim_points_xyz[idx],
+        )
+        self.sim_progress_label.setText(f"Fortschritt: {idx + 1} / {N}")
+        self.sim_index += 1
+
+    @staticmethod
+    def _compute_sim_colors(N: int, current_idx: int, decay_length: int) -> np.ndarray:
+        colors = np.empty((N, 4), dtype=np.float32)
+        colors[:] = [0.1, 0.1, 0.15, 0.2]
+
+        visited = current_idx + 1
+        v_idx = np.arange(visited, dtype=np.int32)
+        age = (current_idx - v_idx).astype(np.float32)
+        tau = max(decay_length / 4.0, 1.0)
+        heat = np.exp(-age / tau)
+
+        rgb = np.empty((visited, 3), dtype=np.float32)
+        alpha = np.empty(visited, dtype=np.float32)
+        settled = np.array([0.3, 0.35, 0.5], dtype=np.float32)
+
+        m1 = heat >= 0.8
+        if m1.any():
+            t = (heat[m1] - 0.8) / 0.2
+            rgb[m1, 0] = 1.0
+            rgb[m1, 1] = 1.0
+            rgb[m1, 2] = 0.85 * t
+            alpha[m1] = 1.0
+
+        m2 = (heat >= 0.5) & ~m1
+        if m2.any():
+            t = (heat[m2] - 0.5) / 0.3
+            rgb[m2, 0] = 1.0
+            rgb[m2, 1] = 0.5 + 0.5 * t
+            rgb[m2, 2] = 0.0
+            alpha[m2] = 1.0
+
+        m3 = (heat >= 0.2) & ~m1 & ~m2
+        if m3.any():
+            t = (heat[m3] - 0.2) / 0.3
+            rgb[m3, 0] = 0.8 + 0.2 * t
+            rgb[m3, 1] = 0.5 * t
+            rgb[m3, 2] = 0.0
+            alpha[m3] = 0.9 + 0.1 * t
+
+        m4 = ~m1 & ~m2 & ~m3
+        if m4.any():
+            t = heat[m4] / 0.2
+            rgb[m4, 0] = settled[0] + (0.8 - settled[0]) * t
+            rgb[m4, 1] = settled[1] * t
+            rgb[m4, 2] = settled[2] * (1.0 - t)
+            alpha[m4] = 0.6 + 0.3 * t
+
+        colors[v_idx, :3] = rgb
+        colors[v_idx, 3] = alpha
+        return colors
+
     def _request_preview(self) -> None:
+        if self.sim_running:
+            return
         if self.preview_worker_active:
             self.preview_pending = True
             return
@@ -700,6 +961,7 @@ class MainWindow(QtWidgets.QMainWindow):
         path_xyz = None
         path_color_values = None
         boundary_xyz = None
+        overlap_mask = None
         total_points = 0
 
         layer_groups = {}
@@ -752,6 +1014,18 @@ class MainWindow(QtWidgets.QMainWindow):
             color_values = np.linspace(0.0, 1.0, len(points_xyz), dtype=np.float32)
             alpha = 0.9 if layer_key == selected_preview_layer else 0.25
             alpha_values = np.full(len(points_xyz), alpha, dtype=np.float32)
+
+            if (
+                layer_key == selected_preview_layer
+                and params.get("segmentation") != "Keine Segmentierung"
+                and params.get("seg_overlap", 0.0) > 0.0
+                and use_reordered
+                and len(display_pts) > 0
+            ):
+                try:
+                    overlap_mask = _detect_overlap_points(display_pts, params, layer_idx)
+                except Exception:
+                    overlap_mask = None
 
             points_xyz_list.append(points_xyz)
             color_values_list.append(color_values)
@@ -810,6 +1084,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "path_xyz": None,
                 "path_color_values": None,
                 "boundary_xyz": None,
+                "overlap_mask": None,
                 "display_points": 0,
                 "total_points": total_points,
                 "layer_count": layer_count,
@@ -827,6 +1102,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "path_xyz": path_xyz,
             "path_color_values": path_color_values,
             "boundary_xyz": boundary_xyz,
+            "overlap_mask": overlap_mask,
             "display_points": len(points_xyz),
             "total_points": total_points,
             "layer_count": layer_count,
@@ -834,6 +1110,9 @@ class MainWindow(QtWidgets.QMainWindow):
         }
 
     def _apply_preview_data(self, data: dict) -> None:
+        if self.sim_running:
+            return
+
         points_xyz = data["points_xyz"]
         color_values = data["color_values"]
         alpha_values = data.get("alpha_values")
@@ -846,6 +1125,14 @@ class MainWindow(QtWidgets.QMainWindow):
         point_colors = np.asarray(getattr(mapped, "rgba", mapped), dtype=np.float32)
         if alpha_values is not None and len(alpha_values) == len(point_colors):
             point_colors[:, 3] = point_colors[:, 3] * alpha_values
+
+        overlap_mask = data.get("overlap_mask")
+        if overlap_mask is not None and len(overlap_mask) == len(point_colors) and overlap_mask.any():
+            blend = 0.55
+            point_colors[overlap_mask, 0] = (1 - blend) * point_colors[overlap_mask, 0] + blend * 1.0
+            point_colors[overlap_mask, 1] = (1 - blend) * point_colors[overlap_mask, 1] + blend * 0.65
+            point_colors[overlap_mask, 2] = (1 - blend) * point_colors[overlap_mask, 2] + blend * 0.0
+            point_colors[overlap_mask, 3] = 0.95
 
         path_colors = None
         if path_xyz is not None and path_color_values is not None:
@@ -876,6 +1163,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_bar.showMessage(
             f"Vorschau: {layer_count} Layer, {display_points} Punkte (gesamt {total})"
         )
+
+        self.sim_button.setEnabled(bool(self.session and self.session.infill_files))
+
+        if self.session and self.session.infill_files:
+            info = self.session.infill_files[self.current_preview_index]
+            sel_layer = self._preview_layer_key(info.filename)
+            seq_idx = self.layer_index_map.get(sel_layer, 0)
+            angle = float(self.rotation_spin.value())
+            eff = (seq_idx * angle) % 360.0
+            self.rotation_info_label.setText(
+                f"Rotation dieser Schicht: {eff:.1f}°  (Schicht #{seq_idx})"
+            )
 
     def _preview_error(self, message: str) -> None:
         self.preview_progress.setRange(0, 100)
@@ -949,6 +1248,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_bar.showMessage("Export-Fehler")
 
     def closeEvent(self, event) -> None:
+        self.sim_timer.stop()
         if self.session:
             self.session.cleanup()
         super().closeEvent(event)
