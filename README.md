@@ -1,4 +1,4 @@
-# EBM Strategy Converter
+# EBM Strategy Converter – Desktop Edition
 
 **Hochschule München (HM) – Studienarbeit im Fachbereich Additive Manufacturing**
 
@@ -6,139 +6,94 @@ Werkzeug zur Neuanordnung von Elektronenstrahl-Belichtungsstrategien für den **
 
 ---
 
-## 🚀 Installation & Start
+## 🚀 Schnellstart
 
-### Schritt 1 – Python installieren (einmalig)
+### Option A – Standalone-EXE (kein Python erforderlich)
+
+Lade die aktuelle `EBM-Strategy.exe` aus dem `dist/`-Ordner herunter und starte sie per Doppelklick.
+
+> **Windows-Sicherheitswarnung:** Beim ersten Start fragt Windows möglicherweise nach Bestätigung → „Weitere Informationen" → „Trotzdem ausführen".
+
+---
+
+### Option B – Aus dem Quellcode starten
+
+#### Schritt 1 – Python installieren (einmalig)
 
 1. Gehe auf **https://www.python.org/downloads/** und lade die neueste Python-Version herunter.
-2. Starte den Installer.
-3. **Wichtig:** Setze ganz unten im Installer-Fenster das Häkchen bei **„Add Python to PATH"**, bevor du auf „Install Now" klickst.
+2. **Wichtig:** Setze im Installer das Häkchen bei **„Add Python to PATH"**.
 
-   ![Python PATH Häkchen](https://docs.python.org/3/_images/win_installer.png)
+#### Schritt 2 – App starten
 
-4. Installation abschließen.
+**Doppelklick auf `Start Desktop.bat`** im Projektordner.
 
-> **Einmal reicht:** Wenn Python bereits installiert ist, diesen Schritt überspringen.
+Das Skript erledigt beim ersten Start automatisch:
+1. Erstellt eine isolierte Python-Umgebung (`.venv`)
+2. Lädt alle benötigten Bibliotheken herunter
+3. Startet die Desktop-App
 
----
-
-### Schritt 2 – App starten (jetzt und in Zukunft)
-
-**Doppelklick auf `Start App.bat`** im Projektordner.
-
-Das Skript erledigt beim **ersten Start** automatisch alles Weitere:
-1. Erstellt eine isolierte Python-Umgebung (`.venv`) im Projektordner
-2. Lädt alle benötigten Bibliotheken herunter und installiert sie
-3. Prüft, ob eine neuere Programmversion verfügbar ist (erfordert Internetzugang)
-4. Startet die App und öffnet sie im Browser unter `http://localhost:8501`
-
-Der erste Start dauert ein paar Minuten (Bibliotheken werden heruntergeladen). Alle weiteren Starts sind deutlich schneller.
-
-> **Das schwarze Terminal-Fenster** muss geöffnet bleiben, solange die App läuft – es kann aber minimiert werden. Beim Schließen des Fensters wird die App beendet.
-
-> **Windows-Sicherheitswarnung:** Beim ersten Start fragt Windows möglicherweise nach Bestätigung → „Weitere Informationen" → „Trotzdem ausführen" klicken.
-
----
-
-### Desktop-App starten (neu)
-
-Die Desktop-Version nutzt PySide6 und eine 3D-Vorschau. Sie startet lokal ohne Browser.
-
-**Option A (empfohlen):** Doppelklick auf `Start Desktop.bat`
-
-**Option B (manuell):**
-
+Oder manuell:
 ```bash
+pip install -r requirements.txt
 python desktop_app.py
 ```
-
-> Hinweis: Beim ersten Start werden die zusätzlichen Abhängigkeiten (PySide6, VisPy, PyOpenGL) installiert.
-
----
-
-### Problemlösung
-
-| Problem | Lösung |
-|---|---|
-| „Python nicht gefunden" | Schritt 1 wiederholen und darauf achten, dass **„Add Python to PATH"** aktiviert ist |
-| Browser öffnet sich nicht | Manuell `http://localhost:8501` in die Adressleiste eingeben |
-| App startet nicht | Terminal-Fenster nach Fehlermeldungen durchsuchen und ggf. Internetzugang prüfen |
 
 ---
 
 ## Verwendung
 
-### 1. ZIP-Archiv hochladen
+### 1. ZIP laden
 
-Lade ein Baujob-ZIP-Archiv hoch, das einen `Figure Files/`-Ordner mit `.B99`-Dateien enthält (wie von der Arcam-Software exportiert).
+Lade ein Baujob-ZIP-Archiv, das einen `Figure Files/`-Ordner mit `.B99`-Dateien enthält (wie von der Arcam-Software exportiert). Die App erkennt und klassifiziert alle Infill-, Kontur- und Stützstruktur-Dateien automatisch.
 
-Die App analysiert die Dateien automatisch und zeigt:
-- Gesamtanzahl der B99-Dateien
-- Anzahl erkannter Infill-Schichten (ab der ersten Schicht mit gerader vorletzter Ziffer im Dateinamen)
-- Anzahl Kontur- und Stützstruktur-Dateien (werden unverändert durchgereicht)
-
-### 2. Strategie konfigurieren (linke Seitenleiste)
+### 2. Strategie konfigurieren
 
 Die Strategie besteht aus zwei unabhängigen Stufen:
 
 **Stufe 1 – Segmentierung (Makro)**
-Teilt die Punktwolke einer Schicht in Bereiche auf, bevor die Mikro-Strategie angewendet wird:
 
 | Option | Beschreibung |
 |---|---|
-| Keine Segmentierung | Alle Punkte werden als ein Block behandelt |
-| Schachbrett (Island) | Quadratische Segmente, alternierend Phase A → Phase B |
-| Streifen (Stripe) | Parallele Bänder, senkrecht zur Hatch-Richtung |
-| Hexagonal | Versetztes Waben-Gitter, alternierend Phase A → Phase B |
-| Spiralzonen | Konzentrische Ringe um den Schwerpunkt (außen → innen oder umgekehrt) |
-
-Für alle Segmentierungstypen (außer „Keine") lassen sich **Segmentgröße (mm)** und **Segment-Overlap (µm)** einstellen.
+| Keine Segmentierung | Alle Punkte als ein Block |
+| Schachbrett (Island) | Quadratische Segmente, Phase A → Phase B |
+| Streifen (Stripe) | Parallele Bänder |
+| Hexagonal | Versetztes Waben-Gitter |
+| Spiralzonen | Konzentrische Ringe um den Schwerpunkt |
 
 **Stufe 2 – Mikro-Strategie (innerhalb der Segmente)**
 
 | Strategie | Beschreibung |
 |---|---|
-| Raster (Zick-Zack) | Punkte werden zeilenweise in Hatch-Abstand sortiert, jede zweite Zeile umgekehrt |
-| Spot Consecutive | Identisch zu Raster (gleiche Sortierung, diskrete Einzelpunkte) |
-| Spot Ordered | Raster + Multipass: erst jeden (Skip+1)-ten Punkt, dann die Lücken |
-| Ghost Beam | Raster + Interleave: Primärpunkt → nachlaufender Geistpunkt (P1→S1→P2→S2…) |
-| Hilbert-Kurve | Punkte nach Hilbert-Index auf einem 2ⁿ × 2ⁿ Grid sortiert |
-| Spiral | Ringweise nach Abstand zum Schwerpunkt, innerhalb des Rings nach Winkel |
-| Peano-Kurve | Schlangenlinien-Sortierung auf feinem quantisierten Grid (Boustrophedon) |
+| Raster (Zick-Zack) | Zeilenweise Sortierung, jede zweite Zeile umgekehrt |
+| Spot Consecutive | Identisch zu Raster |
+| Spot Ordered | Raster + Multipass (Spot-Skip) |
+| Ghost Beam | Raster + Interleave: Primärpunkt → Geistpunkt |
+| Hilbert-Kurve | Hilbert-Index auf 2ⁿ × 2ⁿ Grid |
+| Spiral | Ringweise nach Abstand, dann Winkel |
+| Peano-Kurve | Boustrophedon auf 3ⁿ Grid |
+| Greedy / Dispersion | KDTree-basierte Nachbarschaftsstrategien |
+| Verschachtelte Streifen | Modulare Neuordnung erkannter Streifen |
 
-Gemeinsame Parameter:
-- **Linien-Abstand / Hatch (µm):** Abstand zwischen Hatch-Zeilen (für Raster-Sortierung)
-- **Rotationswinkel pro Schicht (°):** Das Sortiersystem wird pro Schicht gedreht (Standard: 67°)
-
-> **Hinweis:** Der Punktabstand (100 µm) ist fix – er kommt aus dem Slicer und wird nicht verändert.
+**Gemeinsame Parameter:** Segmentgröße, Overlap, Rotationswinkel pro Schicht, Ghost-Lag, Spot-Skip, u. a.
 
 ### 3. Vorschau prüfen
 
-Wähle eine Infill-Datei aus dem Dropdown und betrachte die originale Punktverteilung im interaktiven Plotly-Diagramm. Optional: Wärmeakkumulation als Farbkodierung einblenden (Material und Punkthaltezeit wählbar).
+3D-Vorschau (VisPy) zeigt Punkte und Scan-Pfad für die gewählte Infill-Schicht. Die Simulation animiert die Reihenfolge schrittweise.
 
-Die Schema-Diagramme (aufklappbar) zeigen eine schematische Darstellung der gewählten Stufe-1- und Stufe-2-Strategie.
+### 4. ZIP exportieren
 
-### 4. Strategie anwenden und exportieren
-
-Klicke **„Strategie anwenden & neues ZIP erstellen"**. Die App:
-1. Verarbeitet alle erkannten Infill-Schichten (Fortschrittsbalken)
-2. Schreibt jede Infill-Datei mit neu geordneten Punkten zurück (Header unverändert)
-3. Packt alle Dateien (inklusive unveränderter Kontur- und Stützstruktur-Dateien) in ein neues ZIP
-4. Speichert das ZIP im konfigurierten **Ausgabe-Ordner** (Standard: `~/EBM_Output/`)
-5. Bietet einen **Download-Button** für das neue ZIP
+„Strategie anwenden & ZIP erstellen" verarbeitet alle Infill-Schichten und erstellt ein druckfertiges ZIP im konfigurierten Ausgabeordner.
 
 ---
 
 ## Datei-Klassifikation (Arcam-Namenskonvention)
 
-Die Software erkennt Infill-Dateien anhand der **vorletzten Ziffer** vor `.B99` im Dateinamen:
-
-| Vorletzte Ziffer | Typ | Behandlung |
+| Vorletzte Ziffer vor `.B99` | Typ | Behandlung |
 |---|---|---|
 | Gerade (0, 2, 4, 6, 8) | Infill | Punkte werden neu sortiert |
 | 9 | Infill (ab Cutoff-Schicht) | Punkte werden neu sortiert |
 | Ungerade (1, 3, 5, 7) | Kontur | Unverändert durchgereicht |
-| Alle Schichten vor der ersten geraden Ziffer | Stützstruktur | Unverändert durchgereicht |
+| Alle Schichten vor erster gerader Ziffer | Stützstruktur | Unverändert durchgereicht |
 
 ---
 
@@ -146,9 +101,7 @@ Die Software erkennt Infill-Dateien anhand der **vorletzten Ziffer** vor `.B99` 
 
 - Koordinatensystem: Plattform 120 × 120 mm, Ursprung in der Mitte
 - Normierung: `ABS`-Werte in [-1, +1], wobei `x_mm = ABS_wert × 60`
-- Befehlsformat: `ABS <x_rel> <y_rel>` pro Punkt
-- Ausgabe: 17 signifikante Stellen, `\r\n`-Zeilenenden (wie im Original)
-- Zwischen Segmenten: impliziter Beam-off-Jump (kein explizites Kommando nötig)
+- Ausgabe: 17 signifikante Stellen, `\r\n`-Zeilenenden (Arcam-Anforderung)
 
 ---
 
@@ -156,19 +109,19 @@ Die Software erkennt Infill-Dateien anhand der **vorletzten Ziffer** vor `.B99` 
 
 ```
 EBM-Strategy-Software/
-├── Start App.bat          # ▶ Schnellstart per Doppelklick
-├── Start Desktop.bat      # ▶ Desktop-Version (PySide6)
-├── app.py                 # Haupt-Streamlit-Anwendung
-├── desktop_app.py         # Desktop-UI mit 3D-Vorschau
+├── Start Desktop.bat      # ▶ Schnellstart per Doppelklick
+├── desktop_app.py         # Haupt-Anwendung (PySide6 + VisPy)
+├── EBM-Strategy.spec      # PyInstaller-Konfiguration
 ├── requirements.txt       # Python-Abhängigkeiten
 ├── src/
+│   ├── pipeline.py        # ZIP-Verarbeitung und Workflow
 │   ├── parser.py          # B99-Datei-Parser
 │   ├── exporter.py        # B99-Datei-Export
-│   ├── reorder.py         # Punkt-Neuanordnungslogik
-│   ├── visualization.py   # Plotly-Visualisierung
-│   ├── schema_diagrams.py # Schematische SVG-Diagramme
-│   └── thermal.py         # Wärmeakkumulationsmodell
-└── .venv/                 # Virtuelles Python-Environment
+│   └── reorder.py         # Punkt-Neuanordnungslogik (alle Algorithmen)
+├── docs/
+│   └── scan-strategien.md # Hintergrunddokumentation
+└── dist/
+    └── EBM-Strategy.exe   # Fertige Windows-EXE
 ```
 
 ---
@@ -177,18 +130,24 @@ EBM-Strategy-Software/
 
 | Bibliothek | Verwendung |
 |---|---|
-| **Streamlit** | Web-UI, Interaktion, Dateiupload |
-| **NumPy** | Vektorisierte Punkt-Sortierung (tausende Punkte pro Schicht) |
+| **PySide6** | Desktop-UI (Qt-Framework) |
+| **VisPy** | 3D-Vorschau und Simulation |
+| **NumPy** | Vektorisierte Punkt-Sortierung |
 | **Shapely** | Konvexe Hülle für Segmentierungsalgorithmen |
-| **Plotly** | Interaktive 2D-Visualisierung mit Zoom und Hover |
-| **PySide6 + VisPy** | Desktop-UI und 3D-Vorschau |
+| **SciPy** | KDTree für Greedy/Dispersion-Strategien |
+| **PyInstaller** | EXE-Build |
 
 ---
 
 ## EXE Build (Windows)
 
 ```bash
-pyinstaller --noconfirm --onefile --name EBM-Strategy-Desktop --collect-all vispy desktop_app.py
+pyinstaller EBM-Strategy.spec
 ```
 
-Der erzeugte Build liegt danach unter `dist/EBM-Strategy-Desktop.exe`.
+Oder manuell:
+```bash
+pyinstaller --noconfirm --onefile --collect-all vispy --collect-all shapely --collect-all scipy desktop_app.py
+```
+
+Die fertige EXE liegt unter `dist/EBM-Strategy.exe`.

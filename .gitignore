@@ -36,8 +36,9 @@ desktop.ini
 # --- App-Ausgaben ---
 EBM_Output/
 data/
+dist/
+build/
 
-# --- Streamlit-Cache ---
-.streamlit/
 
 20260408_5Cubes_0_Rotation/
+EBM-Strategy.exe
