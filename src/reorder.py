@@ -645,6 +645,13 @@ def sort_density_adaptive(points: np.ndarray, params: dict, rotation: float) -> 
     Wählt bei jedem Schritt eine Zelle stochastisch gewichtet nach Zelldichte und
     Abstand zur letzten Aktivität. Innerhalb der Zelle wird der Punkt nach gewichtetem
     Abstand zur Verlaufshistorie ausgewählt. Verteilt Wärme adaptiv, nicht reproduzierbar.
+
+    Optimierungen (Algorithmus unverändert):
+    - neighbor_density-Dict: O(1)-Lookup statt 9 Dict-Lookups × pool_limit pro Schritt;
+      wird bei jedem Punktentfernen mit 9 Dekrements inkrementell aktualisiert.
+    - Zell-Gewichte vektorisiert: 1 numpy-Op (hypot) statt pool_limit einzelner norm-Calls.
+    - Punkt-Scoring vektorisiert: 1 Matrixop (cand × mem × 2) statt recent_mem norm-Calls.
+    - Zell-Mittelpunkte als Float-Tupel vorberechnet (kein np.array-Overhead pro Schritt).
     """
     from collections import defaultdict
 
@@ -669,17 +676,31 @@ def sort_density_adaptive(points: np.ndarray, params: dict, rotation: float) -> 
 
     remaining = {cell: set(pts) for cell, pts in cell_pts.items()}
     active_cells = set(remaining.keys())
+
+    # Inkrementelle Zähler: O(1)-Lookup statt len(set()) pro Dichte-Abfrage
+    remaining_count = {cell: len(pts) for cell, pts in remaining.items()}
+
+    # Zell-Mittelpunkte als Float-Tupel (kein np.array()-Overhead pro Schritt)
+    ccx = {cell: minx + cell[0] * cell_size + cell_size * 0.5 for cell in cell_pts}
+    ccy = {cell: miny + cell[1] * cell_size + cell_size * 0.5 for cell in cell_pts}
+
+    # neighbor_density[cell] = Summe der remaining_count aller 3×3-Nachbarn (inkl. Zelle selbst).
+    # Wird bei jedem Punktentfernen mit genau 9 Dekrements aktualisiert – statt bisher
+    # pool_limit × 9 Dict-Lookups pro Schritt (größter Bottleneck im Original).
+    neighbor_density: dict = {}
+    for cell in cell_pts:
+        gx, gy = cell
+        neighbor_density[cell] = sum(
+            remaining_count.get((gx + dx, gy + dy), 0)
+            for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+        )
+
+    # Vorberechnete Decay-Koeffizienten: decay_weights[age] = age_decay^age
+    # Jüngster Punkt (age=0) → Gewicht 1.0; ältester (age=mem-1) → kleinstes Gewicht.
+    decay_weights = age_decay ** np.arange(recent_mem, dtype=np.float64)
+
     order: list = []
     recent: list = []
-
-    def _cell_center(cell):
-        return np.array([minx + cell[0] * cell_size + cell_size / 2,
-                         miny + cell[1] * cell_size + cell_size / 2])
-
-    def _local_density(cell):
-        gx, gy = cell
-        return sum(len(remaining.get((gx + dx, gy + dy), set()))
-                   for dx in (-1, 0, 1) for dy in (-1, 0, 1))
 
     while active_cells:
         pool_cells = list(active_cells)
@@ -687,20 +708,31 @@ def sort_density_adaptive(points: np.ndarray, params: dict, rotation: float) -> 
             pool_cells = [pool_cells[i]
                           for i in rng.choice(len(pool_cells), pool_limit, replace=False)]
 
-        weights = np.empty(len(pool_cells))
-        last_pt = points[recent[-1]] if recent else None
+        P = len(pool_cells)
+
+        # Zell-Gewichte vektorisiert ─────────────────────────────────────────
+        # Python-Loop nur für Dict-Zugriff; eine numpy-Op für alle Distanzen.
+        cx_pool = np.empty(P)
+        cy_pool = np.empty(P)
+        dens = np.empty(P)
         for j, cell in enumerate(pool_cells):
-            density = _local_density(cell)
-            if last_pt is not None:
-                spacing = float(np.linalg.norm(_cell_center(cell) - last_pt))
-            else:
-                spacing = cell_size * 2.0
-            weights[j] = ((spacing + cell_size * 0.35) ** 2) / (1.0 + np.sqrt(max(density, 1)))
+            cx_pool[j] = ccx[cell]
+            cy_pool[j] = ccy[cell]
+            dens[j] = neighbor_density.get(cell, 0)   # O(1) statt 9 Lookups
 
-        weights = np.clip(weights, 1e-12, None)
+        if recent:
+            lx = float(points[recent[-1], 0])
+            ly = float(points[recent[-1], 1])
+            spacing = np.hypot(cx_pool - lx, cy_pool - ly)
+        else:
+            spacing = np.full(P, cell_size * 2.0)
+
+        weights = (spacing + cell_size * 0.35) ** 2 / (1.0 + np.sqrt(np.maximum(dens, 1.0)))
+        weights = np.maximum(weights, 1e-12)
         weights /= weights.sum()
-        chosen_cell = pool_cells[int(rng.choice(len(pool_cells), p=weights))]
+        chosen_cell = pool_cells[int(rng.choice(P, p=weights))]
 
+        # Punkte in gewählter Zelle ─────────────────────────────────────────
         cell_pool = list(remaining[chosen_cell])
         if len(cell_pool) > candidate_limit:
             cell_pool = [cell_pool[i]
@@ -709,18 +741,40 @@ def sort_density_adaptive(points: np.ndarray, params: dict, rotation: float) -> 
         if not recent:
             chosen_pt = cell_pool[0]
         else:
-            cand_pts = points[cell_pool]
-            pt_weights = np.zeros(len(cell_pool))
-            for age, r_idx in enumerate(reversed(recent[-recent_mem:])):
-                pt_weights += (age_decay ** age) * np.linalg.norm(cand_pts - points[r_idx], axis=1)
-            pt_weights = np.clip(pt_weights, 1e-12, None)
+            cand_pts = points[cell_pool]           # (C, 2)
+
+            # Punkt-Scoring vektorisiert ─────────────────────────────────────
+            # recent[-mem:] = [ältester … neuester]; decays entsprechend umgekehrt.
+            mem = min(len(recent), recent_mem)
+            recent_pts = points[recent[-mem:]]     # (mem, 2) – fancy index
+            # decay_weights[:mem][::-1] = [age_decay^(mem-1), …, 1.0]
+            # → ältester Punkt bekommt kleinstes, neuester größtes Gewicht
+            decays = decay_weights[:mem][::-1]     # (mem,)
+
+            # (C, mem, 2) – eine Matrixop statt mem einzelner norm-Calls
+            diffs = cand_pts[:, np.newaxis, :] - recent_pts[np.newaxis, :, :]
+            dists = np.sqrt((diffs * diffs).sum(axis=2))   # (C, mem)
+            pt_weights = dists @ decays                     # (C,)
+
+            pt_weights = np.maximum(pt_weights, 1e-12)
             pt_weights /= pt_weights.sum()
             chosen_pt = cell_pool[int(rng.choice(len(cell_pool), p=pt_weights))]
 
         order.append(chosen_pt)
         recent.append(chosen_pt)
+
+        # Inkrementeller Update ──────────────────────────────────────────────
         remaining[chosen_cell].discard(chosen_pt)
-        if not remaining[chosen_cell]:
+        remaining_count[chosen_cell] -= 1
+        # neighbor_density aller 3×3-Nachbarn um 1 dekrementieren (9 Updates statt
+        # pool_limit × 9 Lookups beim nächsten Schritt → Hauptoptimierung)
+        gx, gy = chosen_cell
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                nbr = (gx + dx, gy + dy)
+                if nbr in neighbor_density:
+                    neighbor_density[nbr] -= 1
+        if remaining_count[chosen_cell] == 0:
             active_cells.discard(chosen_cell)
 
     return points[order]
