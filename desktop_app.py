@@ -778,6 +778,7 @@ class MainWindow(QtWidgets.QMainWindow):
         worker.signals.error.connect(
             lambda msg: self.status_bar.showMessage(f"Sim-Fehler: {msg}")
         )
+        worker.signals.finished.connect(self._sim_load_finished)
         self.thread_pool.start(worker)
 
     @staticmethod
@@ -811,6 +812,12 @@ class MainWindow(QtWidgets.QMainWindow):
         N = len(sim_xyz)
         self.sim_progress_label.setText(f"Fortschritt: 0 / {N}")
         self.sim_timer.start(max(10, int(self.sim_dwell_spin.value()) // 1000))
+
+    def _sim_load_finished(self) -> None:
+        """Stellt den Sim-Button wieder her, falls der Ladevorgang ohne Daten endet (z. B. Fehler)."""
+        if not self.sim_running:
+            self.sim_button.setEnabled(bool(self.session and self.session.infill_files))
+            self.sim_progress_label.setText("Fortschritt: –")
 
     def _stop_simulation(self) -> None:
         self.sim_timer.stop()
@@ -971,6 +978,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "path_xyz": None,
                 "path_color_values": None,
                 "boundary_xyz": None,
+                "overlap_mask": None,
                 "display_points": 0,
                 "total_points": 0,
                 "layer_count": 0,
@@ -1233,10 +1241,7 @@ class MainWindow(QtWidgets.QMainWindow):
         worker.signals.progress.connect(self.progress_bar.setValue)
         worker.signals.result.connect(self._export_finished)
         worker.signals.error.connect(self._export_error)
-        worker.signals.finished.connect(lambda: self.export_button.setEnabled(True))
-        worker.signals.finished.connect(lambda: self.load_button.setEnabled(True))
-        worker.signals.finished.connect(lambda: self.output_dir_button.setEnabled(True))
-        worker.signals.finished.connect(lambda: self.output_dir_edit.setEnabled(True))
+        worker.signals.finished.connect(self._export_restore_ui)
         self.thread_pool.start(worker)
 
     def _export_job(self, params: dict, output_dir: str, progress_callback=None) -> dict:
@@ -1264,6 +1269,13 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.export_status.setText(f"Export OK: {out_zip}")
         self.status_bar.showMessage("Export abgeschlossen")
+
+    def _export_restore_ui(self) -> None:
+        """Stellt nach dem Export alle UI-Elemente wieder auf aktiv."""
+        self.export_button.setEnabled(True)
+        self.load_button.setEnabled(True)
+        self.output_dir_button.setEnabled(True)
+        self.output_dir_edit.setEnabled(True)
 
     def _export_error(self, message: str) -> None:
         self.export_status.setText(f"Export-Fehler: {message}")

@@ -189,6 +189,8 @@ def _segment_hexagonal(points_mm: np.ndarray, seg_size: float, seg_order: str):
 
     phase_a = [(r, c) for (r, c) in unique_cells if (r + c) % 2 == 0]
     phase_b = [(r, c) for (r, c) in unique_cells if (r + c) % 2 == 1]
+    phase_a = _order_cells(phase_a, seg_order)
+    phase_b = _order_cells(phase_b, seg_order)
     ordered = phase_a + phase_b
 
     segments = []
@@ -353,9 +355,9 @@ def sort_ghost_beam(points: np.ndarray, params: dict, rotation: float) -> np.nda
         lag_count = max(1, N // 4)
 
     result = np.empty((N * 2, 2), dtype=points.dtype)
-    for i in range(N):
-        result[2 * i] = points[i]
-        result[2 * i + 1] = points[max(0, i - lag_count)]
+    ghost_idx = np.maximum(0, np.arange(N) - lag_count)
+    result[0::2] = points
+    result[1::2] = points[ghost_idx]
     return result
 
 
@@ -476,12 +478,14 @@ def sort_local_greedy(points: np.ndarray, params: dict, rotation: float) -> np.n
     w2 = float(params.get('greedy_w2', 0.5))
     K = max(memory * 6, 48)
 
+    from collections import deque
+
     tree = KDTree(points)
     visited = np.zeros(N, dtype=bool)
     order = np.empty(N, dtype=int)
     order[0] = 0
     visited[0] = True
-    recent = [0]
+    recent: deque = deque([0], maxlen=memory)
 
     for step in range(1, N):
         current = points[order[step - 1]]
@@ -500,7 +504,7 @@ def sort_local_greedy(points: np.ndarray, params: dict, rotation: float) -> np.n
         cand_pts = points[unvisited]
         cand_dists = np.linalg.norm(cand_pts - current, axis=1)
         repulsion = np.zeros(len(unvisited))
-        for r_idx in recent[-memory:]:
+        for r_idx in recent:
             repulsion += np.linalg.norm(cand_pts - points[r_idx], axis=1)
 
         best = int(np.argmin(cand_dists - w2 * repulsion))
@@ -518,9 +522,9 @@ def sort_dispersion_max(points: np.ndarray, params: dict, rotation: float) -> np
     Maximiert die räumliche Verteilung durch Auswahl möglichst weit entfernter
     Punkte. Bewertet Kandidaten als score = dist_zum_aktuellen + w2 * summe(dist_zu_letzten_N).
     Kandidatenpool: die K weitesten unbesuchten Punkte. Verteilt Wärme über die Fläche.
-    Nutzt KDTree (scipy).
+    Nutzt nur numpy (kein KDTree – Kandidatenpool per argpartition).
     """
-    from scipy.spatial import KDTree
+    from collections import deque
 
     N = len(points)
     if N <= 1:
@@ -530,12 +534,11 @@ def sort_dispersion_max(points: np.ndarray, params: dict, rotation: float) -> np
     w2 = float(params.get('greedy_w2', 0.5))
     K = max(memory * 6, 48)
 
-    tree = KDTree(points)
     visited = np.zeros(N, dtype=bool)
     order = np.empty(N, dtype=int)
     order[0] = 0
     visited[0] = True
-    recent = [0]
+    recent: deque = deque([0], maxlen=memory)
 
     for step in range(1, N):
         current = points[order[step - 1]]
@@ -555,7 +558,7 @@ def sort_dispersion_max(points: np.ndarray, params: dict, rotation: float) -> np
         cand_dists = dists[cand_local]
 
         spread = np.zeros(len(cand_local))
-        for r_idx in recent[-memory:]:
+        for r_idx in recent:
             spread += np.linalg.norm(cand_pts - points[r_idx], axis=1)
 
         best = int(np.argmax(cand_dists + w2 * spread))
@@ -576,7 +579,7 @@ def sort_grid_dispersion(points: np.ndarray, params: dict, rotation: float,
     höchsten gewichteten Abstand zur Verlaufshistorie gewählt (age_decay=0.9).
     Im stochastischen Modus: zufällige Stichprobe aus Zellkandidaten.
     """
-    from collections import defaultdict
+    from collections import defaultdict, deque
 
     N = len(points)
     if N <= 1:
@@ -612,7 +615,9 @@ def sort_grid_dispersion(points: np.ndarray, params: dict, rotation: float,
 
     remaining = {cell: set(pts) for cell, pts in cell_pts.items()}
     order: list = []
-    recent: list = []
+    recent: deque = deque(maxlen=recent_mem)
+    # Vorberechnete Gewichte: ältester Eintrag → kleinstes Gewicht, neuester → 1.0
+    decay_w = age_decay ** np.arange(recent_mem - 1, -1, -1, dtype=np.float64)
 
     for cell in cell_order:
         cell_set = remaining.get(cell, set())
@@ -626,10 +631,12 @@ def sort_grid_dispersion(points: np.ndarray, params: dict, rotation: float,
             if not recent:
                 chosen = pool[0]
             else:
-                cand_pts = points[pool]
-                scores = np.zeros(len(pool))
-                for age, r_idx in enumerate(reversed(recent[-recent_mem:])):
-                    scores += (age_decay ** age) * np.linalg.norm(cand_pts - points[r_idx], axis=1)
+                cand_pts = points[pool]                      # (C, 2)
+                mem = len(recent)
+                recent_pts = points[list(recent)]            # (mem, 2) – oldest first
+                diffs = cand_pts[:, np.newaxis, :] - recent_pts[np.newaxis, :, :]
+                dists = np.sqrt((diffs * diffs).sum(axis=2)) # (C, mem)
+                scores = dists @ decay_w[-mem:]              # (C,) – newest→1.0
                 chosen = pool[int(np.argmax(scores))]
 
             order.append(chosen)
