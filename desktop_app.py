@@ -466,10 +466,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sim_dwell_spin.setToolTip(
             "Verweildauer pro Punkt in Mikrosekunden.\n"
             "Realistische EBM-Haltezeit: 13 µs.\n"
-            "Animationsgeschwindigkeit: max(10 ms, Wert / 1000) pro Punkt."
+            "Bestimmt das Timer-Intervall: max(10 ms, Wert / 1000).\n"
+            "Effektive Geschwindigkeit = Pkt/Tick ÷ Timer-Intervall."
         )
         dwell_row.addWidget(QtWidgets.QLabel("µs / Punkt:"))
         dwell_row.addWidget(self.sim_dwell_spin)
+
+        speed_row = QtWidgets.QHBoxLayout()
+        self.sim_speed_spin = QtWidgets.QSpinBox()
+        self.sim_speed_spin.setRange(1, 2000)
+        self.sim_speed_spin.setSingleStep(10)
+        self.sim_speed_spin.setValue(1)
+        self.sim_speed_spin.setSuffix(" Pkt/Tick")
+        self.sim_speed_spin.setToolTip(
+            "Wie viele Punkte pro Timer-Tick simuliert werden.\n"
+            "1 = Echtzeit-ähnlich (langsam, jeder Punkt sichtbar).\n"
+            "100 = ca. 10.000 Pkt/s → gesamten Layer in Sekunden.\n"
+            "500+ = Schnelldurchlauf für große Layer."
+        )
+        speed_row.addWidget(QtWidgets.QLabel("Geschwindigkeit:"))
+        speed_row.addWidget(self.sim_speed_spin)
 
         decay_row = QtWidgets.QHBoxLayout()
         self.sim_decay_spin = QtWidgets.QSpinBox()
@@ -483,6 +499,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         layout.addWidget(self.sim_button)
         layout.addLayout(dwell_row)
+        layout.addLayout(speed_row)
         layout.addLayout(decay_row)
         layout.addWidget(self.sim_progress_label)
         return group
@@ -820,15 +837,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if idx >= N:
             self._stop_simulation()
             return
+        # Mehrere Punkte pro Tick überspringen (Geschwindigkeits-Multiplikator)
+        steps = max(1, int(self.sim_speed_spin.value()))
+        display_idx = min(idx + steps - 1, N - 1)
         decay = int(self.sim_decay_spin.value())
-        colors = self._compute_sim_colors(N, idx, decay)
+        colors = self._compute_sim_colors(N, display_idx, decay)
         self.preview_canvas.update_sim(
             all_xyz=self.sim_points_xyz,
             all_colors=colors,
-            hot_xyz=self.sim_points_xyz[idx],
+            hot_xyz=self.sim_points_xyz[display_idx],
         )
-        self.sim_progress_label.setText(f"Fortschritt: {idx + 1} / {N}")
-        self.sim_index += 1
+        self.sim_progress_label.setText(f"Fortschritt: {display_idx + 1} / {N}")
+        self.sim_index = display_idx + 1
+        if self.sim_index >= N:
+            self._stop_simulation()
 
     @staticmethod
     def _compute_sim_colors(N: int, current_idx: int, decay_length: int) -> np.ndarray:
