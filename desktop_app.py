@@ -1,5 +1,6 @@
 import os
 import sys
+from collections import defaultdict
 from typing import Optional
 
 import numpy as np
@@ -7,7 +8,7 @@ from PySide6 import QtCore, QtWidgets
 from shapely.geometry import MultiPoint
 from vispy import color, scene
 
-from src.pipeline import ZipSession, export_zip, process_infill_files, read_points_mm
+from src.pipeline import ZipSession, read_points_mm, run_export
 from src.reorder import reorder_points, segment_points
 
 
@@ -21,12 +22,16 @@ def _detect_overlap_points(points_mm: np.ndarray, params: dict, layer_idx: int) 
     rotation = (layer_idx * params.get("rotation_angle_deg", 0.0)) % 360.0
     segments = segment_points(points_mm, polygon, params, rotation)
     count = np.zeros(len(points_mm), dtype=np.int32)
-    key_to_idx = {(round(float(x), 4), round(float(y), 4)): i for i, (x, y) in enumerate(points_mm)}
+    # Schlüssel → Liste aller Indizes: Punkte, die auf denselben gerundeten
+    # Schlüssel fallen (Duplikate, <0,1 µm Abstand), werden alle gezählt.
+    key_to_indices = defaultdict(list)
+    for i, (x, y) in enumerate(points_mm):
+        key_to_indices[(round(float(x), 4), round(float(y), 4))].append(i)
     for seg in segments:
         for x, y in seg:
             k = (round(float(x), 4), round(float(y), 4))
-            if k in key_to_idx:
-                count[key_to_idx[k]] += 1
+            for i in key_to_indices.get(k, ()):
+                count[i] += 1
     return count > 1
 
 
@@ -592,14 +597,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         for info in self.session.infill_files:
-            preview_layer = self._preview_layer_key(info.filename)
-            label = f"{info.filename} (Layer {preview_layer})"
+            label = f"{info.filename} (Layer {info.layer_key})"
             self.infill_combo.addItem(label)
 
-        self.layer_order = sorted(
-            {self._preview_layer_key(info.filename) for info in self.session.b99_files}
-        )
-        self.layer_index_map = {layer: idx for idx, layer in enumerate(self.layer_order)}
+        self.layer_index_map = self.session.layer_seq_map
+        self.layer_order = sorted(self.layer_index_map)
 
         self.layer_slider.setMaximum(max(0, len(self.session.infill_files) - 1))
         self.layer_slider.setValue(0)
@@ -646,8 +648,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.layer_label.setText("Layer: -")
             return
         info = self.session.infill_files[index]
-        preview_layer = self._preview_layer_key(info.filename)
-        self.layer_label.setText(f"Layer: {preview_layer}")
+        self.layer_label.setText(f"Layer: {info.layer_key}")
 
     def _set_row_visible(
         self,
@@ -657,22 +658,6 @@ class MainWindow(QtWidgets.QMainWindow):
     ) -> None:
         label.setVisible(visible)
         field.setVisible(visible)
-
-    def _preview_layer_key(self, filename: str) -> int:
-        stem = os.path.splitext(filename)[0]
-        digits = "".join(ch for ch in stem if ch.isdigit())
-        if len(digits) <= 2:
-            return int(digits) if digits else 0
-        return int(digits[:-2])
-
-    def _object_id_from_filename(self, filename: str) -> int:
-        stem = os.path.splitext(filename)[0]
-        digits = "".join(ch for ch in stem if ch.isdigit())
-        if not digits:
-            return -1
-        if len(digits) < 2:
-            return int(digits)
-        return int(digits[-2])
 
     def _update_strategy_controls(self) -> None:
         micro = self.micro_combo.currentText()
@@ -769,11 +754,10 @@ class MainWindow(QtWidgets.QMainWindow):
             and info.classification in ("infill_even", "infill_9")
             and info.layer >= self.session.cutoff_layer
         )
-        sel_layer = self._preview_layer_key(info.filename)
-        layer_seq_idx = self.layer_index_map.get(sel_layer, 0)
+        layer_seq_idx = self.layer_index_map.get(info.layer_key, 0)
         z_val = float(layer_seq_idx) * LAYER_HEIGHT_MM
 
-        worker = Worker(self._load_sim_data, info, params, should_reorder, z_val)
+        worker = Worker(self._load_sim_data, info, params, should_reorder, z_val, layer_seq_idx)
         worker.signals.result.connect(self._apply_sim_data)
         worker.signals.error.connect(
             lambda msg: self.status_bar.showMessage(f"Sim-Fehler: {msg}")
@@ -782,12 +766,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.thread_pool.start(worker)
 
     @staticmethod
-    def _load_sim_data(info, params: dict, should_reorder: bool, z_val: float) -> np.ndarray:
+    def _load_sim_data(
+        info, params: dict, should_reorder: bool, z_val: float, layer_seq_idx: int
+    ) -> np.ndarray:
         pts = read_points_mm(info.path)
         if pts.size == 0:
             return np.zeros((0, 3), dtype=np.float32)
         if should_reorder:
-            pts = reorder_points(pts, params, info.layer)
+            pts = reorder_points(pts, params, layer_seq_idx)
         N = len(pts)
         z_col = np.full((N, 1), z_val, dtype=np.float32)
         return np.hstack([pts.astype(np.float32), z_col])
@@ -925,17 +911,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         info = self.session.infill_files[self.current_preview_index]
         if not self.layer_index_map:
-            self.layer_order = sorted(
-                {self._preview_layer_key(item.filename) for item in self.session.b99_files}
-            )
-            self.layer_index_map = {layer: idx for idx, layer in enumerate(self.layer_order)}
-        selected_preview_layer = self._preview_layer_key(info.filename)
+            self.layer_index_map = self.session.layer_seq_map
+            self.layer_order = sorted(self.layer_index_map)
+        selected_preview_layer = info.layer_key
         selected_layer_index = self.layer_index_map.get(selected_preview_layer, 0)
         preview_infos = [
             item
             for item in self.session.b99_files
-            if self.layer_index_map.get(self._preview_layer_key(item.filename), 0)
-            <= selected_layer_index
+            if self.layer_index_map.get(item.layer_key, 0) <= selected_layer_index
         ]
         params = self._collect_params()
         max_points = int(self.max_points_spin.value())
@@ -996,16 +979,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
         layer_groups = {}
         for info in preview_infos:
-            layer_key = self._preview_layer_key(info.filename)
-            layer_groups.setdefault(layer_key, []).append(info)
+            layer_groups.setdefault(info.layer_key, []).append(info)
 
         layer_count = len(layer_groups)
         per_layer_max = max(50, max_points)
+        selected_list_idx = None
 
         for layer_key in sorted(layer_groups):
             layer_infos = layer_groups[layer_key]
             layer_points_list = []
             path_points_list = []
+            # Sequentieller Schichtindex – dieselbe Rotationsbasis wie beim Export
+            layer_idx = layer_index_map.get(layer_key, 0)
 
             for info in layer_infos:
                 points_mm = read_points_mm(info.path)
@@ -1018,7 +1003,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     and info.layer >= cutoff_layer
                 )
                 if should_reorder:
-                    points_mm = reorder_points(points_mm, params, info.layer)
+                    points_mm = reorder_points(points_mm, params, layer_idx)
 
                 layer_points_list.append(points_mm)
 
@@ -1036,7 +1021,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 rng = np.random.default_rng(layer_key)
                 indices = rng.choice(len(layer_points), size=per_layer_max, replace=False)
                 display_pts = layer_points[indices].astype(np.float32)
-            layer_idx = layer_index_map.get(layer_key, 0)
             z_val = layer_idx * LAYER_HEIGHT_MM
             z_col = np.full((display_pts.shape[0], 1), z_val, dtype=np.float32)
             points_xyz = np.hstack([display_pts, z_col])
@@ -1054,6 +1038,9 @@ class MainWindow(QtWidgets.QMainWindow):
             ):
                 try:
                     overlap_mask = _detect_overlap_points(display_pts, params, layer_idx)
+                    # Position der ausgewählten Schicht im Gesamtarray merken,
+                    # damit die Maske später auf den richtigen Abschnitt fällt
+                    selected_list_idx = len(points_xyz_list)
                 except Exception:
                     overlap_mask = None
 
@@ -1075,8 +1062,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 for info in layer_infos:
                     if info.classification != "contour":
                         continue
-                    obj_id = self._object_id_from_filename(info.filename)
-                    contour_groups.setdefault(obj_id, []).append(info)
+                    contour_groups.setdefault(info.object_id, []).append(info)
 
                 boundary_segments = []
                 for obj_id, contour_infos in contour_groups.items():
@@ -1125,6 +1111,14 @@ class MainWindow(QtWidgets.QMainWindow):
         color_values = np.concatenate(color_values_list)
         alpha_values = np.concatenate(alpha_values_list)
 
+        # Maske der ausgewählten Schicht auf das Gesamtarray ausdehnen, damit
+        # sie in _apply_preview_data auf point_colors (alle Schichten) passt
+        full_overlap_mask = None
+        if overlap_mask is not None and selected_list_idx is not None:
+            offset = int(sum(len(a) for a in points_xyz_list[:selected_list_idx]))
+            full_overlap_mask = np.zeros(len(points_xyz), dtype=bool)
+            full_overlap_mask[offset:offset + len(overlap_mask)] = overlap_mask
+
         return {
             "points_xyz": points_xyz,
             "color_values": color_values,
@@ -1132,7 +1126,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "path_xyz": path_xyz,
             "path_color_values": path_color_values,
             "boundary_xyz": boundary_xyz,
-            "overlap_mask": overlap_mask,
+            "overlap_mask": full_overlap_mask,
             "display_points": len(points_xyz),
             "total_points": total_points,
             "layer_count": layer_count,
@@ -1198,8 +1192,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self.session and self.session.infill_files:
             info = self.session.infill_files[self.current_preview_index]
-            sel_layer = self._preview_layer_key(info.filename)
-            seq_idx = self.layer_index_map.get(sel_layer, 0)
+            seq_idx = self.layer_index_map.get(info.layer_key, 0)
             angle = float(self.rotation_spin.value())
             eff = (seq_idx * angle) % 360.0
             self.rotation_info_label.setText(
@@ -1254,11 +1247,7 @@ class MainWindow(QtWidgets.QMainWindow):
             value = int((current / total) * 100) if total else 0
             progress_callback(value)
 
-        errors = process_infill_files(self.session.infill_files, params, progress_cb=progress_cb)
-
-        base_name = os.path.splitext(os.path.basename(self.session.zip_path))[0]
-        out_zip = export_zip(self.session.extract_dir, output_dir, base_name)
-
+        errors, out_zip = run_export(self.session, params, output_dir, progress_cb=progress_cb)
         return {"errors": errors, "out_zip": out_zip}
 
     def _export_finished(self, result: dict) -> None:

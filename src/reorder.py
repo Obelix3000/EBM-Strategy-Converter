@@ -216,8 +216,10 @@ def _segment_spiral_zones(points_mm: np.ndarray, polygon, seg_size: float, seg_o
     ring_idx = (dist / seg_size).astype(int)
     unique_rings = sorted(set(ring_idx.tolist()))
 
-    # außen→innen (Standard) oder innen→außen
-    if 'außen' in seg_order:
+    # 'Spirale (außen→innen)' → größte Ringe zuerst; alles andere innen→außen.
+    # Präfix-Check wie in _order_cells – ein reiner 'außen'-Substring-Test würde
+    # auch 'Spirale (innen→außen)' treffen.
+    if 'Spirale (außen' in seg_order:
         unique_rings = sorted(unique_rings, reverse=True)
 
     segments = []
@@ -660,7 +662,7 @@ def sort_density_adaptive(points: np.ndarray, params: dict, rotation: float) -> 
     - Punkt-Scoring vektorisiert: 1 Matrixop (cand × mem × 2) statt recent_mem norm-Calls.
     - Zell-Mittelpunkte als Float-Tupel vorberechnet (kein np.array-Overhead pro Schritt).
     """
-    from collections import defaultdict
+    from collections import defaultdict, deque
 
     N = len(points)
     if N <= 1:
@@ -707,7 +709,7 @@ def sort_density_adaptive(points: np.ndarray, params: dict, rotation: float) -> 
     decay_weights = age_decay ** np.arange(recent_mem, dtype=np.float64)
 
     order: list = []
-    recent: list = []
+    recent: deque = deque(maxlen=recent_mem)
 
     while active_cells:
         pool_cells = list(active_cells)
@@ -751,9 +753,9 @@ def sort_density_adaptive(points: np.ndarray, params: dict, rotation: float) -> 
             cand_pts = points[cell_pool]           # (C, 2)
 
             # Punkt-Scoring vektorisiert ─────────────────────────────────────
-            # recent[-mem:] = [ältester … neuester]; decays entsprechend umgekehrt.
-            mem = min(len(recent), recent_mem)
-            recent_pts = points[recent[-mem:]]     # (mem, 2) – fancy index
+            # deque(maxlen=recent_mem) hält die letzten Punkte, ältester zuerst.
+            mem = len(recent)
+            recent_pts = points[list(recent)]      # (mem, 2) – fancy index
             # decay_weights[:mem][::-1] = [age_decay^(mem-1), …, 1.0]
             # → ältester Punkt bekommt kleinstes, neuester größtes Gewicht
             decays = decay_weights[:mem][::-1]     # (mem,)
