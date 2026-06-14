@@ -1,0 +1,33 @@
+% =====================================================================
+%  Eigenständiges Vorschau-Dokument für die EBM-Anleitung.
+%  Dient nur zum Kompilieren/Ansehen der Anleitung als PDF.
+%  Der eigentliche Inhalt steckt in anleitung.tex und wird per \input
+%  eingebunden -- genau so, wie es im Hauptdokument des Kollegen geschieht.
+%
+%  Kompilieren:  pdflatex anleitung_standalone.tex
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{amssymb}   % für die Symbole der App-Buttons (Play/Stopp)
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage[hidelinks]{hyperref}
+
+% Grafikpfad: Screenshots liegen relativ zu dieser Datei.
+\graphicspath{{./}{screenshots/}}
+
+\title{EBM Strategy Converter\\\large Kurzanleitung zur Bedienung}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\input{anleitung.tex}
+
+\end{document}
