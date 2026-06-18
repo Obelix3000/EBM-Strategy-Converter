@@ -170,19 +170,50 @@ def _segment_stripes(points_mm: np.ndarray, seg_size: float, rotation: float, se
 
 # Funktion um Hexagonale zu segmentieren
 def _segment_hexagonal(points_mm: np.ndarray, seg_size: float, seg_order: str):
-    """Hexagonale Segmentierung: versetztes Gitter, alternierend Phase A/B."""
+    """Hexagonale Segmentierung: echte sechseckige Inseln.
+
+    Jeder Punkt wird dem nächstgelegenen Mittelpunkt eines pointy-top
+    Hexagongitters zugewiesen. Die Voronoi-Region eines solchen Gitters ist
+    ein regelmäßiges Sechseck → echte hexagonale Zellen (kein versetztes
+    Rechteckraster wie zuvor). Mittelpunkte: Reihen im Abstand v = 1.5*R,
+    Spalten im Abstand h = sqrt(3)*R, ungerade Reihen um h/2 versetzt
+    (R = seg_size = Umkreisradius des Sechsecks).
+
+    Der nächste Mittelpunkt liegt immer in der gerundeten Reihe oder einer
+    direkten Nachbarreihe – daher werden nur 3 Kandidatenreihen geprüft
+    (vektorisiert, O(N)).
+    """
     if len(points_mm) == 0:
         return []
 
-    h = seg_size * np.sqrt(3)   # horizontaler Abstand zwischen Hex-Mittelpunkten
-    v = seg_size * 1.5           # vertikaler Abstand
+    R = seg_size
+    h = R * np.sqrt(3.0)   # horizontaler Abstand zwischen Hex-Mittelpunkten (gleiche Reihe)
+    v = R * 1.5            # vertikaler Abstand zwischen Reihen
 
     minx = points_mm[:, 0].min()
     miny = points_mm[:, 1].min()
+    x = points_mm[:, 0]
+    y = points_mm[:, 1]
 
-    row_idx = ((points_mm[:, 1] - miny) / v).astype(int)
-    x_offset = np.where(row_idx % 2 == 1, h / 2.0, 0.0)
-    col_idx = ((points_mm[:, 0] - minx - x_offset) / h).astype(int)
+    r0 = np.round((y - miny) / v).astype(int)
+
+    row_idx = None
+    col_idx = None
+    best_d2 = None
+    for dr in (-1, 0, 1):
+        rr = r0 + dr
+        x_off = np.where(rr % 2 != 0, h / 2.0, 0.0)   # numpy-%: (-1)%2==1 → konsistent
+        cc = np.round((x - minx - x_off) / h).astype(int)
+        cx = minx + cc * h + x_off
+        cy = miny + rr * v
+        d2 = (x - cx) ** 2 + (y - cy) ** 2
+        if best_d2 is None:
+            best_d2, row_idx, col_idx = d2, rr, cc
+        else:
+            better = d2 < best_d2
+            best_d2 = np.where(better, d2, best_d2)
+            row_idx = np.where(better, rr, row_idx)
+            col_idx = np.where(better, cc, col_idx)
 
     cell_keys = np.stack([row_idx, col_idx], axis=1)
     unique_cells = list(set(map(tuple, cell_keys.tolist())))
