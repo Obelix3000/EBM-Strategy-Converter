@@ -225,6 +225,63 @@ def process_infill_files(
     return errors
 
 
+def build_strategy_tag(params: dict) -> str:
+    """Kompakter, dateinamentauglicher Strategie-Kürzel aus den params.
+
+    Beispiel: 'Schach2.0mm-ov0.1_SpotOrd-s1_rot0' – beschreibt die gewählte
+    Segmentierung, Mikro-Strategie und (falls ≠ 0) die Schichtrotation, damit
+    man der Export-ZIP ansieht, womit sie erzeugt wurde.
+    """
+    seg_codes = {
+        "Keine Segmentierung": "",
+        "Schachbrett (Island)": "Schach",
+        "Streifen (Stripe)": "Streifen",
+        "Hexagonal": "Hexa",
+        "Spiralzonen (Konzentrisch)": "Spiralz",
+    }
+    micro_codes = {
+        "Raster (Zick-Zack)": "Raster",
+        "Spot Consecutive": "SpotCons",
+        "Spot Ordered": "SpotOrd",
+        "Ghost Beam": "Ghost",
+        "Hilbert-Kurve": "Hilbert",
+        "Spiral": "Spiral",
+        "Peano-Kurve": "Peano",
+        "Greedy (Nächster Nachbar)": "Greedy",
+        "Dispersions-Maximum": "DispMax",
+        "Gitter-Dispersion (deterministisch)": "GitDispDet",
+        "Gitter-Dispersion (stochastisch)": "GitDispStoch",
+        "Dichte-adaptiv": "DichteAdapt",
+        "Verschachtelte Streifen": "VStreifen",
+    }
+
+    parts: List[str] = []
+
+    seg = params.get("segmentation", "Keine Segmentierung")
+    seg_code = seg_codes.get(seg, "")
+    if seg_code:
+        seg_part = f"{seg_code}{float(params.get('seg_size', 5.0)):g}mm"
+        overlap_um = float(params.get("seg_overlap", 0.0))
+        if overlap_um > 0:
+            seg_part += f"-ov{overlap_um / 1000.0:g}"
+        parts.append(seg_part)
+
+    micro = params.get("micro_strategy", "Raster (Zick-Zack)")
+    micro_code = micro_codes.get(micro, "Micro")
+    if micro == "Spot Ordered":
+        micro_code += f"-s{int(params.get('spot_skip', 2))}"
+    elif micro == "Ghost Beam":
+        micro_code += f"-lag{float(params.get('ghost_lag', 1000.0)) / 1000.0:g}"
+    parts.append(micro_code)
+
+    rot = float(params.get("rotation_angle_deg", 0.0))
+    parts.append(f"rot{rot:g}")
+
+    tag = "_".join(parts)
+    # Nur dateinamen-sichere Zeichen behalten
+    return re.sub(r"[^0-9A-Za-z._-]", "", tag)
+
+
 def run_export(
     session: "ZipSession",
     params: dict,
@@ -251,15 +308,16 @@ def run_export(
             layer_seq_map=session.layer_seq_map,
         )
         base_name = os.path.splitext(os.path.basename(session.zip_path))[0]
-        out_zip = export_zip(work_dir, output_dir, base_name)
+        out_zip = export_zip(work_dir, output_dir, base_name, build_strategy_tag(params))
         return errors, out_zip
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def export_zip(extract_dir: str, output_dir: str, base_name: str) -> str:
+def export_zip(extract_dir: str, output_dir: str, base_name: str, strategy_tag: str = "") -> str:
     os.makedirs(output_dir, exist_ok=True)
-    out_zip_name = f"{base_name}_NEW.zip"
+    suffix = f"_{strategy_tag}" if strategy_tag else ""
+    out_zip_name = f"{base_name}{suffix}_NEW.zip"
     out_zip_path = os.path.join(output_dir, out_zip_name)
 
     with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:

@@ -7,6 +7,7 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets
 from shapely.geometry import MultiPoint
 from vispy import color, scene
+from vispy.scene.cameras import TurntableCamera
 
 from src.pipeline import ZipSession, read_points_mm, run_export
 from src.reorder import reorder_points, segment_points
@@ -14,6 +15,62 @@ from src.reorder import reorder_points, segment_points
 
 BUILD_PLATE_HALF_MM = 60.0
 LAYER_HEIGHT_MM = 0.08
+
+
+class PanTurntableCamera(TurntableCamera):
+    """Turntable-Kamera mit explizitem Pan (Verschieben des Baubetts).
+
+    - Linke Maustaste: drehen (wie bisher)
+    - Rechte/mittlere Maustaste ODER Shift+links: verschieben (Pan)
+    - Mausrad: zoomen (wie bisher)
+
+    Das Pan verschiebt den Kamera-Mittelpunkt (`center`) in der aktuellen
+    Bildebene, sodass das Bauteil optisch im Sichtfeld bewegt werden kann,
+    ohne die Geometrie zu verändern.
+    """
+
+    _PAN_SPEED = 1.0
+
+    def viewbox_mouse_event(self, event):
+        if event.handled or not self.interactive:
+            return
+
+        if event.type == "mouse_move" and event.press_event is not None:
+            modifiers = event.mouse_event.modifiers
+            btn = event.press_event.button
+            # Pan: rechte (2) / mittlere (3) Taste oder Shift+links
+            wants_pan = btn in (2, 3) or (btn == 1 and "Shift" in [str(m) for m in modifiers])
+            if wants_pan:
+                self._pan(event)
+                event.handled = True
+                return
+
+        super().viewbox_mouse_event(event)
+
+    def _pan(self, event):
+        p1 = event.last_event.pos
+        p2 = event.pos
+        dx = (p2[0] - p1[0]) * self._PAN_SPEED
+        dy = (p2[1] - p1[1]) * self._PAN_SPEED
+
+        # Bildschirm-Pixel → Weltkoordinaten skalieren (Distanz bestimmt Maßstab)
+        canvas = event.source.canvas
+        scale = self.distance / max(canvas.size[1], 1) * (2.0 * np.tan(np.radians(self.fov) / 2.0)) \
+            if self.fov > 0 else self.scale_factor / max(canvas.size[1], 1)
+
+        # Kamera-Rechts- und Hoch-Vektoren aus den aktuellen Winkeln
+        azr = np.radians(self.azimuth)
+        elr = np.radians(self.elevation)
+        right = np.array([np.cos(azr), np.sin(azr), 0.0])
+        up = np.array([
+            -np.sin(elr) * np.sin(azr),
+            np.sin(elr) * np.cos(azr),
+            np.cos(elr),
+        ])
+
+        shift = (-dx * right + dy * up) * scale
+        center = np.array(self.center, dtype=float) + shift
+        self.center = tuple(center)
 
 
 def _detect_overlap_points(points_mm: np.ndarray, params: dict, layer_idx: int) -> np.ndarray:
@@ -70,9 +127,8 @@ class PreviewCanvas(QtWidgets.QWidget):
         super().__init__(parent)
         self.canvas = scene.SceneCanvas(keys="interactive", bgcolor="#0e0f12", show=False)
         self.view = self.canvas.central_widget.add_view()
-        self.view.camera = "turntable"
-        self.view.camera.fov = 45
-        self.view.camera.distance = 220
+        # Pan-fähige Turntable-Kamera: links drehen, rechts/mittig (oder Shift+links) verschieben
+        self.view.camera = PanTurntableCamera(fov=45, distance=220)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -268,7 +324,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_mode_combo.addItems(["Punkte", "Linien", "Beides"])
         self.preview_mode_combo.setCurrentText("Beides")
 
-        self.preview_hint = QtWidgets.QLabel("Rotation sichtbar in Linien/Beides")
+        self.preview_hint = QtWidgets.QLabel(
+            "Rotation sichtbar in Linien/Beides  •  Maus: links=drehen, "
+            "rechts/Shift+links=verschieben, Rad=zoomen"
+        )
         self.preview_hint.setWordWrap(True)
 
         self.reordered_check = QtWidgets.QCheckBox("Strategie anwenden (reorder)")

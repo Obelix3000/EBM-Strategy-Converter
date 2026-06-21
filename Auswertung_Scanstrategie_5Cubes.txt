@@ -1,0 +1,161 @@
+================================================================================
+Auswertung der Scan-Strategie - Bauteil "5 Cubes"
+Vergleich des fehlgeschlagenen Baujobs mit den neuen Konfigurationen
+================================================================================
+
+Bezug:
+  Datensatz   20260408_5Cubes_0_Rotation (5 Wuerfel, ca. 14 mm Kantenlaenge,
+              174 physische Schichten)
+  Infill je Wuerfel-Schicht: ca. 9.500 Schmelzpunkte auf einem regelmaessigen
+              0,1-mm-Rasternetz (138 Hatch-Linien). Die Geometrie (Punktpositionen)
+              ist in allen verglichenen Faellen identisch - es wird ausschliesslich
+              die Belichtungs-Reihenfolge veraendert.
+
+Alle Kennzahlen beziehen sich auf eine repraesentative mittlere Infill-Schicht
+eines Wuerfels und wurden direkt aus den exportierten B99-Dateien berechnet.
+"Sprung" = euklidischer Abstand zwischen zwei in der Datei aufeinanderfolgenden
+Schmelzpunkten. Im EBM-Spotmodus entspricht das der Strahl-Ablenkung von einem
+geschmolzenen Punkt zum naechsten.
+
+
+--------------------------------------------------------------------------------
+1. Warum der urspruengliche Baujob fehlgeschlagen ist
+--------------------------------------------------------------------------------
+
+Der fehlgeschlagene Job wurde mit der Strategie "Dichte-adaptiv" (density
+adaptive) ohne Makro-Segmentierung und ohne Schichtrotation erzeugt. Diese
+Strategie ordnet die Schmelzpunkte so an, dass die raeumliche Streuung zwischen
+aufeinanderfolgenden Punkten MAXIMIERT wird.
+
+Messwerte dieser Strategie (eine Wuerfel-Schicht):
+
+  - mittlerer Sprung zwischen zwei Punkten:   6,21 mm
+  - Median:                                   6,27 mm
+  - 95-%-Perzentil:                          10,02 mm
+  - groesster Sprung:                        12,89 mm  (Ecke zu Ecke)
+  - gesamter Strahl-Ablenkweg pro Schicht:   ca. 59 m
+
+Zum Vergleich liegt der mittlere Sprung bei einer konventionellen
+Raster-Belichtung bei 0,10 mm und der Ablenkweg bei rund 0,96 m. Der
+fehlgeschlagene Job bewegt den Strahl also bei praktisch jedem Punkt quer ueber
+nahezu das gesamte Bauteil - im Mittel rund 60-mal weiter und ueber einen
+61-mal laengeren Gesamtweg als ein normales Raster.
+
+Zwei Effekte erklaeren das Versagen:
+
+(a) Keine lokale, wandernde Schmelzfront.
+    Bereits 50 aufeinanderfolgende Schmelzpunkte ueberdecken etwa 54 % der
+    Wuerfel-Querschnittsflaeche. Da die Strahlablenkung im EBM elektromagnetisch
+    und damit nahezu traegheitslos erfolgt, wird in der Integrationszeit einer
+    Kamera (bzw. des Auges) faktisch die gesamte Flaeche gleichzeitig bearbeitet.
+    Im Maschinenvideo entstand dadurch der Eindruck, dass "alle Punkte
+    gleichzeitig" aufschmelzen. Es bildet sich kein zusammenhaengender, lokal
+    fortschreitender Schmelzpool - die Voraussetzung fuer eine dichte, fehlerfreie
+    Anbindung fehlt.
+
+(b) Aufladung und Aufwirbeln des Pulverbetts ("Smoke").
+    Das grossflaechige, sehr schnelle Springen des Elektronenstrahls ueber noch
+    loses, nicht ausreichend vorgesintertes Pulver beguenstigt die
+    elektrostatische Aufladung des Pulverbetts. Ueberschreitet diese einen
+    kritischen Wert, wird Pulver abgestossen und aufgewirbelt (in der EBM-Technik
+    als "Smoke" bezeichnet). Dies erklaert das im Video beobachtete "Zerschiessen"
+    der Wuerfel: Statt verfestigter Bauteile entstand aufgewirbeltes bzw. nur lose
+    gesintertes Pulver.
+
+Fazit: Die Strategie "Dichte-adaptiv" optimiert genau die Groesse (maximale
+raeumliche Streuung pro Zeit), die im EBM-Prozess thermisch und prozesstechnisch
+schaedlich ist. Sie ist fuer reale Bauteile ungeeignet.
+
+
+--------------------------------------------------------------------------------
+2. Neue Konfigurationen - was zu erwarten ist
+--------------------------------------------------------------------------------
+
+Beide neuen Konfigurationen kombinieren eine Makro-Segmentierung (Schachbrett /
+Island) mit der Mikro-Strategie "Spot Ordered" (skip = 2) und einem
+Insel-Ueberlapp von 150 µm. Unterschied ist nur die Inselgroesse (2 mm bzw. 3 mm).
+
+Wirkprinzip:
+  - Schachbrett (Island): Die Flaeche wird in kleine Inseln zerlegt, die in zwei
+    Phasen (erst jede zweite Insel, dann die Luecken) belichtet werden. Dadurch
+    bleibt die Waermeeinbringung lokal begrenzt und wird ueber die Schicht
+    gleichmaessig verteilt, ohne dass eine einzelne Region ueberhitzt.
+  - Spot Ordered (skip = 2): Innerhalb jeder Insel wird in mehreren Durchgaengen
+    belichtet (zuerst jeder dritte Punkt, dann die versetzten Luecken). Das
+    glaettet lokale Hitzespitzen, haelt die aufeinanderfolgenden Punkte aber
+    weiterhin im Sub-Millimeterbereich beieinander.
+  - Ueberlapp 150 µm: Benachbarte Inseln greifen leicht ineinander, sodass an den
+    Inselgrenzen keine Bindefehler entstehen. Punkte in der Ueberlappzone werden
+    bewusst doppelt belichtet.
+
+Messwerte (eine Wuerfel-Schicht):
+
+  Kennzahl                         Fehldruck   Raster   Schach2mm  Schach3mm
+  ----------------------------------------------------------------------------
+  mittlerer Sprung [mm]               6,21      0,10      0,31       0,31
+  Median [mm]                         6,27      0,10      0,30       0,30
+  95-%-Perzentil [mm]                10,02      0,10      0,30       0,30
+  groesster Einzelsprung [mm]        12,89      0,14     12,72      12,89
+  Strahl-Ablenkweg pro Schicht [m]    59        0,96      3,5        3,3
+  Flaeche je 50 Punkte [%]            54        0         2          2
+  Anzahl Inseln (Segmente)            -         1         ca. 85     ca. 46
+
+Erwartung und Interpretation:
+
+  - Der mittlere Sprung sinkt von 6,21 mm auf ca. 0,31 mm (Faktor ~20), das
+    95-%-Perzentil von 10,02 mm auf 0,30 mm. 95 % aller Strahlbewegungen bleiben
+    damit im Sub-Millimeterbereich. Der Gesamt-Ablenkweg faellt von 59 m auf
+    rund 3,3-3,5 m. Damit ist die Hauptursache des Fehldrucks - die
+    flaechendeckende, gleichzeitige Belichtung - behoben: In einem Fenster von
+    50 aufeinanderfolgenden Punkten werden nur noch ca. 2 % der Querschnittsflaeche
+    bearbeitet (statt 54 %). Es entsteht wieder eine lokale, wandernde
+    Schmelzfront, und das prozessbedingte Aufwirbeln des Pulvers ("Smoke") ist
+    nicht mehr zu erwarten.
+
+  - Der weiterhin auftretende Maximalsprung von ca. 12,7-12,9 mm ist KEIN
+    Ruecksprung in das schaedliche Verhalten des Fehldrucks. Er tritt nur an den
+    wenigen Uebergaengen zwischen den Schachbrett-Inseln auf (Wechsel von einer
+    Insel zur naechsten bzw. von Phase A zu Phase B). Bei einem 14-mm-Wuerfel sind
+    das bei 2 mm Inseln rund 85, bei 3 mm Inseln rund 46 solcher Uebergaenge -
+    also weniger als 1 % aller Punkte. Im Fehldruck sprang dagegen JEDER Punkt
+    ueber mehrere Millimeter; hier liegen ueber 99 % der Bewegung lokal.
+
+  - Unterschied 2 mm gegenueber 3 mm Inselgroesse:
+      * 3 mm: weniger, dafuer groessere Inseln (ca. 46 statt 85). Weniger
+        Inselgrenzen und damit weniger weite Inter-Insel-Spruenge; etwas kuerzerer
+        Gesamtweg (3,3 statt 3,5 m). Innerhalb der groesseren Insel wird die Waerme
+        ueber eine etwas groessere zusammenhaengende Flaeche eingebracht.
+      * 2 mm: kleinere Inseln, staerker begrenzte lokale Waermeeinbringung,
+        gleichmaessigere Verteilung ueber die Schicht, aber mehr Inselgrenzen und
+        damit etwas mehr Ueberlapp-Doppelbelichtung (siehe unten).
+    Beide Konfigurationen sind prozesssicher; die Wahl ist ein Kompromiss zwischen
+    feinerer Waermeverteilung (2 mm) und weniger Inselgrenzen/Sprungaufwand (3 mm).
+
+  - Ueberlapp 150 µm erhoeht die Punktzahl pro Schicht durch
+    Doppelbelichtung an den Inselraendern:
+      * 2 mm Inseln: +17,9 % Punkte (9.522 -> ca. 11.229)
+      * 3 mm Inseln: +12,2 % Punkte (9.522 -> ca. 10.683)
+    Bei groesseren Inseln ist der Randanteil kleiner, daher faellt der Mehraufwand
+    durch den Ueberlapp bei 3 mm geringer aus. Dieser Mehraufwand verlaengert die
+    Belichtungszeit entsprechend und ist beim Vergleich der Bauzeit zu
+    beruecksichtigen.
+
+
+--------------------------------------------------------------------------------
+3. Zusammenfassung in einem Satz
+--------------------------------------------------------------------------------
+
+Der urspruengliche Baujob schlug fehl, weil die Strategie "Dichte-adaptiv" den
+Strahl bei nahezu jedem Punkt um ca. 6 mm quer ueber das gesamte Bauteil
+ablenkte (61-facher Ablenkweg gegenueber einem Raster), wodurch keine lokale
+Schmelzfront entstand und das lose Pulver aufgewirbelt wurde; die neuen
+Schachbrett-Konfigurationen (2 mm bzw. 3 mm, Spot Ordered skip 2, 150 µm
+Ueberlapp) reduzieren den mittleren Sprung auf ca. 0,31 mm und stellen eine
+lokal begrenzte, prozesssichere Waermeeinbringung wieder her.
+
+Hinweis zur Methodik: Saemtliche Kennzahlen wurden aus den exportierten
+B99-Punktdaten der jeweiligen Strategie berechnet. Die Punktgeometrie ist in
+allen Faellen identisch; veraendert wird ausschliesslich die Belichtungs-
+Reihenfolge. Die Werte beziehen sich auf eine repraesentative Wuerfel-Schicht
+und sind ueber die Schichten hinweg nahezu konstant.
+================================================================================
