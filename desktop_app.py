@@ -511,8 +511,83 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addRow(self.interlace_forward_label, self.interlace_forward_spin)
         layout.addRow(self.interlace_backward_label, self.interlace_backward_spin)
 
+        # --- Optionale Kontur-Neuanordnung (klappt auf, wenn aktiviert) ---
+        contour_sep = QtWidgets.QFrame()
+        contour_sep.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        contour_sep.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        layout.addRow(contour_sep)
+
+        self.contour_reorder_check = QtWidgets.QCheckBox("Konturen ebenfalls neu anordnen")
+        self.contour_reorder_check.setToolTip(
+            "Ordnet zusätzlich die Kontur-Spots jeder Schicht neu (zur Oberflächen-\n"
+            "verbesserung). Konturen sind dünne Ränder – sie werden ohne Flächen-\n"
+            "segmentierung verarbeitet, nur die Spot-Reihenfolge des Rings wird sortiert.\n"
+            "Koordinaten bleiben unverändert; die Vorschau zeigt weiterhin das Infill."
+        )
+        layout.addRow(self.contour_reorder_check)
+
+        self.contour_box = QtWidgets.QWidget()
+        contour_form = QtWidgets.QFormLayout(self.contour_box)
+        contour_form.setContentsMargins(12, 0, 0, 0)
+
+        self.contour_micro_combo = QtWidgets.QComboBox()
+        self.contour_micro_combo.addItems(
+            [
+                "Spot Ordered",
+                "Dispersions-Maximum",
+                "Greedy (Nächster Nachbar)",
+                "Spot Consecutive",
+                "Raster (Zick-Zack)",
+            ]
+        )
+        self.contour_micro_combo.setToolTip(
+            "Nur punktbasierte Strategien, die auf einem dünnen Konturring funktionieren.\n"
+            "Flächen-Segmentierung (Schachbrett/Hexagonal/Spiralzonen) ist hier bewusst\n"
+            "nicht verfügbar, da sie auf der schmalen Kontur entartet."
+        )
+
+        self.contour_spot_skip_spin = QtWidgets.QSpinBox()
+        self.contour_spot_skip_spin.setRange(1, 20)
+        self.contour_spot_skip_spin.setValue(2)
+
+        self.contour_greedy_memory_spin = QtWidgets.QSpinBox()
+        self.contour_greedy_memory_spin.setRange(1, 10)
+        self.contour_greedy_memory_spin.setValue(4)
+
+        self.contour_greedy_w2_spin = QtWidgets.QDoubleSpinBox()
+        self.contour_greedy_w2_spin.setRange(0.0, 2.0)
+        self.contour_greedy_w2_spin.setSingleStep(0.1)
+        self.contour_greedy_w2_spin.setValue(0.5)
+
+        contour_form.addRow("Kontur-Strategie", self.contour_micro_combo)
+        self.contour_spot_skip_label = QtWidgets.QLabel("Spot Skip")
+        self.contour_greedy_memory_label = QtWidgets.QLabel("Greedy Gedaechtnis")
+        self.contour_greedy_w2_label = QtWidgets.QLabel("Greedy Gewicht")
+        contour_form.addRow(self.contour_spot_skip_label, self.contour_spot_skip_spin)
+        contour_form.addRow(self.contour_greedy_memory_label, self.contour_greedy_memory_spin)
+        contour_form.addRow(self.contour_greedy_w2_label, self.contour_greedy_w2_spin)
+
+        self.contour_box.setVisible(False)
+        layout.addRow(self.contour_box)
+
         self._update_strategy_controls()
+        self._update_contour_controls()
         return group
+
+    def _update_contour_controls(self) -> None:
+        """Zeigt je nach gewählter Kontur-Strategie nur die relevanten Parameter."""
+        micro = self.contour_micro_combo.currentText()
+        is_spot = micro == "Spot Ordered"
+        is_greedy = micro in ("Greedy (Nächster Nachbar)", "Dispersions-Maximum")
+        self.contour_spot_skip_label.setVisible(is_spot)
+        self.contour_spot_skip_spin.setVisible(is_spot)
+        for w in (
+            self.contour_greedy_memory_label,
+            self.contour_greedy_memory_spin,
+            self.contour_greedy_w2_label,
+            self.contour_greedy_w2_spin,
+        ):
+            w.setVisible(is_greedy)
 
     def _build_simulation_group(self) -> QtWidgets.QGroupBox:
         group = QtWidgets.QGroupBox("Simulation")
@@ -610,6 +685,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.grid_cell_spin.valueChanged.connect(self._request_preview)
         self.interlace_forward_spin.valueChanged.connect(self._request_preview)
         self.interlace_backward_spin.valueChanged.connect(self._request_preview)
+        # Kontur-Neuanordnung: nur Aufklappen/Anzeige – wirkt nicht auf die Infill-Vorschau
+        self.contour_reorder_check.toggled.connect(self.contour_box.setVisible)
+        self.contour_micro_combo.currentIndexChanged.connect(self._update_contour_controls)
         self.export_button.clicked.connect(self._run_export)
         self.sim_button.clicked.connect(self._toggle_simulation)
         self.sim_dwell_spin.valueChanged.connect(self._on_dwell_changed)
@@ -790,6 +868,11 @@ class MainWindow(QtWidgets.QMainWindow):
             "interlace_forward": int(self.interlace_forward_spin.value()),
             "interlace_backward": int(self.interlace_backward_spin.value()),
             "point_spacing": 100.0,
+            "contour_reorder": self.contour_reorder_check.isChecked(),
+            "contour_micro_strategy": self.contour_micro_combo.currentText(),
+            "contour_spot_skip": int(self.contour_spot_skip_spin.value()),
+            "contour_greedy_memory": int(self.contour_greedy_memory_spin.value()),
+            "contour_greedy_w2": float(self.contour_greedy_w2_spin.value()),
         }
 
     def _toggle_simulation(self) -> None:

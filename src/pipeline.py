@@ -225,6 +225,26 @@ def process_infill_files(
     return errors
 
 
+def _build_contour_params(params: dict) -> dict:
+    """Leitet aus dem Haupt-Parametersatz einen Parametersatz für die optionale
+    Kontur-Neuanordnung ab.
+
+    Konturen sind dünne Ränder (kein gefülltes Gebiet) – eine 2D-Flächen-
+    Segmentierung (Schachbrett/Hexagonal/Spiralzonen) entartet darauf. Deshalb
+    wird die Kontur ohne Segmentierung verarbeitet; nur die Spot-Reihenfolge des
+    Rings wird über eine punktbasierte Mikro-Strategie neu sortiert. Alle übrigen
+    Schlüssel werden vom Haupt-Parametersatz geerbt, damit reorder_points keine
+    fehlenden Keys sieht."""
+    cp = dict(params)
+    cp["segmentation"] = "Keine Segmentierung"
+    cp["seg_overlap"] = 0.0  # kein Overlap → keine Punktverdopplung auf der Kontur
+    cp["micro_strategy"] = params.get("contour_micro_strategy", "Spot Ordered")
+    cp["spot_skip"] = int(params.get("contour_spot_skip", params.get("spot_skip", 2)))
+    cp["greedy_memory"] = int(params.get("contour_greedy_memory", params.get("greedy_memory", 4)))
+    cp["greedy_w2"] = float(params.get("contour_greedy_w2", params.get("greedy_w2", 0.5)))
+    return cp
+
+
 def build_strategy_tag(params: dict) -> str:
     """Kompakter, dateinamentauglicher Strategie-Kürzel aus den params.
 
@@ -277,6 +297,10 @@ def build_strategy_tag(params: dict) -> str:
     rot = float(params.get("rotation_angle_deg", 0.0))
     parts.append(f"rot{rot:g}")
 
+    if params.get("contour_reorder"):
+        cmicro = micro_codes.get(params.get("contour_micro_strategy", ""), "Kontur")
+        parts.append(f"Kont{cmicro}")
+
     tag = "_".join(parts)
     # Nur dateinamen-sichere Zeichen behalten
     return re.sub(r"[^0-9A-Za-z._-]", "", tag)
@@ -297,16 +321,36 @@ def run_export(
     work_dir = tempfile.mkdtemp(prefix="ebm_export_")
     try:
         shutil.copytree(session.extract_dir, work_dir, dirs_exist_ok=True)
-        work_infill = [
-            replace(info, path=os.path.join(work_dir, os.path.relpath(info.path, session.extract_dir)))
-            for info in session.infill_files
-        ]
+
+        def to_work(info: B99FileInfo) -> B99FileInfo:
+            return replace(info, path=os.path.join(work_dir, os.path.relpath(info.path, session.extract_dir)))
+
+        work_infill = [to_work(info) for info in session.infill_files]
+        do_contour = bool(params.get("contour_reorder"))
+        work_contour = [to_work(info) for info in session.contour_files] if do_contour else []
+
+        # Gemeinsamer Fortschritt über Infill- und (optional) Kontur-Dateien.
+        total = len(work_infill) + len(work_contour)
+
+        def rebased_cb(offset: int):
+            if progress_cb is None:
+                return None
+            return lambda current, _total: progress_cb(offset + current, total)
+
         errors = process_infill_files(
             work_infill,
             params,
-            progress_cb=progress_cb,
+            progress_cb=rebased_cb(0),
             layer_seq_map=session.layer_seq_map,
         )
+        if do_contour:
+            errors += process_infill_files(
+                work_contour,
+                _build_contour_params(params),
+                progress_cb=rebased_cb(len(work_infill)),
+                layer_seq_map=session.layer_seq_map,
+            )
+
         base_name = os.path.splitext(os.path.basename(session.zip_path))[0]
         out_zip = export_zip(work_dir, output_dir, base_name, build_strategy_tag(params))
         return errors, out_zip

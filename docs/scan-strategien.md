@@ -33,14 +33,14 @@ Die Segmentierungsfunktionen teilen die N×2-Punktwolke in eine geordnete Liste 
 
 ### Schachbrett (`_segment_chessboard`)
 
-**Funktionsweise:** Das Bounding-Box-Raster der Punktwolke wird in gleichgroße quadratische Zellen (`seg_size × seg_size` mm) aufgeteilt. Zellen mit geradem `(Zeile + Spalte)`-Index bilden **Phase A**, Zellen mit ungeradem Index **Phase B**. Erst werden alle A-Zellen in der gewählten Reihenfolge abgearbeitet, anschließend alle B-Zellen. Die Reihenfolge innerhalb jeder Phase kann konfiguriert werden: sequentiell (Zeilen-Spalten), Spirale innen→außen, Spirale außen→innen oder zufällig.
+**Funktionsweise:** Das Raster der Punktwolke wird in gleichgroße quadratische Zellen (`seg_size × seg_size` mm) aufgeteilt. Das Zellgitter wird dabei um `rotation_angle_deg` pro Schicht um den Teil-Schwerpunkt gedreht (analog zu den Streifen), sodass die Insel-Nähte und Overlap-Zonen von Schicht zu Schicht versetzt liegen und sich nicht deckungsgleich übereinander stapeln. Zellen mit geradem `(Zeile + Spalte)`-Index bilden **Phase A**, Zellen mit ungeradem Index **Phase B**. Erst werden alle A-Zellen in der gewählten Reihenfolge abgearbeitet, anschließend alle B-Zellen. Die Reihenfolge innerhalb jeder Phase kann konfiguriert werden: sequentiell (Zeilen-Spalten), Spirale innen→außen, Spirale außen→innen oder zufällig.
 
 Die Zweiphasen-Struktur bewirkt, dass direkt benachbarte Zellen immer unterschiedlichen Phasen angehören – der Strahl springt also nach jeder Zelle mindestens eine Zellbreite weit weg, bevor er in die benachbarte Zelle zurückkehrt. Das lässt bereits bearbeitete Bereiche abkühlen.
 
 | Vorteile | Nachteile |
 |---|---|
 | Gute räumliche Verteilung durch Zweiphasen-Schema | Lange Sprünge zwischen den Phasen (Totzeit) |
-| Kompatibel mit allen Mikro-Strategien | Zellgrenzen sind achsenparallel – bei gedrehten Hatch-Linien kann die Aufteilung suboptimal sein |
+| Kompatibel mit allen Mikro-Strategien | Bei `rotation_angle_deg = 0` liegen die Zellgrenzen auf jeder Schicht deckungsgleich – Nähte stapeln sich |
 | Sehr etablierte Methode im EBM-Bereich (Island Scanning) | Zellgröße muss manuell auf Schichtgeometrie abgestimmt werden |
 
 ---

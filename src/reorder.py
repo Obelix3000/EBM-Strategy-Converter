@@ -84,7 +84,7 @@ def segment_points(points_mm: np.ndarray, polygon, params: dict, rotation: float
     overlap_mm = params.get('seg_overlap', 0.0) / 1000.0  # µm → mm
 
     if 'Schachbrett' in seg_type:
-        return _segment_chessboard(points_mm, seg_size, seg_order, overlap_mm)
+        return _segment_chessboard(points_mm, seg_size, seg_order, overlap_mm, rotation)
     elif 'Streifen' in seg_type:
         return _segment_stripes(points_mm, seg_size, rotation, seg_order, overlap_mm)
     elif 'Hexagonal' in seg_type:
@@ -94,16 +94,29 @@ def segment_points(points_mm: np.ndarray, polygon, params: dict, rotation: float
     return [points_mm]
 
 # Funktion um das Schachbrett zu segmentieren
-def _segment_chessboard(points_mm: np.ndarray, seg_size: float, seg_order: str, overlap_mm: float = 0.0):
+def _segment_chessboard(points_mm: np.ndarray, seg_size: float, seg_order: str, overlap_mm: float = 0.0, rotation: float = 0.0):
     """Schachbrett-Segmentierung: erst Phase A ((row+col)%2==0), dann Phase B.
-    Mit overlap_mm > 0 werden Randpunkte beider angrenzender Zellen zugewiesen (Punkte können doppelt vorkommen)."""
+    Mit overlap_mm > 0 werden Randpunkte beider angrenzender Zellen zugewiesen (Punkte können doppelt vorkommen).
+
+    Das Zellgitter wird um `rotation` (Grad) um den Teil-Schwerpunkt gedreht – analog zu
+    _segment_stripes. Dadurch versetzt die schichtweise Rotation die Insel-Nähte und
+    Overlap-Doppelbelichtungszonen; sie stapeln sich nicht mehr deckungsgleich übereinander."""
     if len(points_mm) == 0:
         return []
 
-    minx = points_mm[:, 0].min()
-    miny = points_mm[:, 1].min()
-    x_rel = points_mm[:, 0] - minx
-    y_rel = points_mm[:, 1] - miny
+    # In das gedrehte Gitter-Koordinatensystem transformieren. Alle nachfolgenden
+    # Zell- und Overlap-Berechnungen laufen in (x_rel, y_rel) dieses gedrehten Systems.
+    cos_r = np.cos(np.radians(rotation))
+    sin_r = np.sin(np.radians(rotation))
+    cx, cy = points_mm.mean(axis=0)
+    rel = points_mm - [cx, cy]
+    x_rot = rel[:, 0] * cos_r - rel[:, 1] * sin_r
+    y_rot = rel[:, 0] * sin_r + rel[:, 1] * cos_r
+
+    minx = x_rot.min()
+    miny = y_rot.min()
+    x_rel = x_rot - minx
+    y_rel = y_rot - miny
     half_ov = overlap_mm / 2.0
 
     col_idx = (x_rel / seg_size).astype(int)
