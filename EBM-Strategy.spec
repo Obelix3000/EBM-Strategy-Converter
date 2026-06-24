@@ -21,7 +21,21 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # Schwergewichtige Pakete, die die App NICHT nutzt. Sie werden nur über
+    # optionale Backends von scipy (array_api_compat: torch/dask/cupy) bzw.
+    # zufällig in der Umgebung installierte Pakete eingezogen und blähen die EXE
+    # auf. Die App importiert real nur: PySide6, vispy, numpy, shapely, scipy.spatial.
+    excludes=[
+        'torch', 'torchvision', 'torchaudio',
+        'tensorflow', 'tensorboard',
+        'sklearn', 'scikit-learn',
+        'sympy',
+        'pandas',
+        'matplotlib',
+        'cv2',
+        'dask', 'cupy',
+        'IPython', 'ipykernel', 'jupyter', 'jupyter_client', 'notebook',
+    ],
     noarchive=False,
     optimize=0,
 )
