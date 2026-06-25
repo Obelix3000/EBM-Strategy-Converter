@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional
 
 import numpy as np
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 from shapely.geometry import MultiPoint
 from vispy import color, scene
 from vispy.scene.cameras import TurntableCamera
@@ -125,7 +125,7 @@ class Worker(QtCore.QRunnable):
 class PreviewCanvas(QtWidgets.QWidget):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
-        self.canvas = scene.SceneCanvas(keys="interactive", bgcolor="#0e0f12", show=False)
+        self.canvas = scene.SceneCanvas(keys="interactive", bgcolor="#f5f6f8", show=False)
         self.view = self.canvas.central_widget.add_view()
         # Pan-fähige Turntable-Kamera: links drehen, rechts/mittig (oder Shift+links) verschieben
         self.view.camera = PanTurntableCamera(fov=45, distance=220)
@@ -155,7 +155,7 @@ class PreviewCanvas(QtWidgets.QWidget):
         for y in np.arange(-half, half + grid_step, grid_step):
             grid_lines.extend([[-half, y, 0.0], [half, y, 0.0], [np.nan, np.nan, np.nan]])
         grid_pos = np.array(grid_lines, dtype=np.float32)
-        self.grid_visual.set_data(pos=grid_pos, color=(0.25, 0.27, 0.3, 0.35))
+        self.grid_visual.set_data(pos=grid_pos, color=(0.45, 0.48, 0.53, 0.45))
 
         plate = np.array(
             [
@@ -215,7 +215,7 @@ class PreviewCanvas(QtWidgets.QWidget):
         if hot_xyz is not None and hot_xyz.size > 0:
             self.sim_hot_visual.set_data(
                 pos=hot_xyz.reshape(1, 3),
-                face_color=np.array([[1.0, 1.0, 0.85, 1.0]], dtype=np.float32),
+                face_color=np.array([[0.9, 0.1, 0.08, 1.0]], dtype=np.float32),
                 size=10,
             )
             self.sim_hot_visual.visible = True
@@ -481,13 +481,13 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addRow("Linien-Abstand (um)", self.hatch_spacing_spin)
         layout.addRow("Rotation pro Layer (grad)", self.rotation_spin)
         self.rotation_info_label = QtWidgets.QLabel("Rotation dieser Schicht: –")
-        self.rotation_info_label.setStyleSheet("color: #aaaaff; font-size: 10px;")
+        self.rotation_info_label.setStyleSheet("color: #3a55c0; font-size: 10px;")
         layout.addRow("", self.rotation_info_label)
         self.rotation_warning_label = QtWidgets.QLabel(
             "⚠ Rotation hat keinen Effekt bei Raster ohne Segmentierung"
         )
         self.rotation_warning_label.setStyleSheet(
-            "color: #ffaa44; font-style: italic; font-size: 10px;"
+            "color: #c25b00; font-style: italic; font-size: 10px;"
         )
         self.rotation_warning_label.setWordWrap(True)
         self.rotation_warning_label.setVisible(False)
@@ -990,7 +990,9 @@ class MainWindow(QtWidgets.QMainWindow):
     @staticmethod
     def _compute_sim_colors(N: int, current_idx: int, decay_length: int) -> np.ndarray:
         colors = np.empty((N, 4), dtype=np.float32)
-        colors[:] = [0.1, 0.1, 0.15, 0.2]
+        # Noch nicht belichtete Punkte: sehr dezentes Hellgrau – sollen zurücktreten,
+        # damit der warme Heat-Trail im Vordergrund steht.
+        colors[:] = [0.74, 0.78, 0.84, 0.30]
 
         visited = current_idx + 1
         v_idx = np.arange(visited, dtype=np.int32)
@@ -1000,39 +1002,42 @@ class MainWindow(QtWidgets.QMainWindow):
 
         rgb = np.empty((visited, 3), dtype=np.float32)
         alpha = np.empty(visited, dtype=np.float32)
-        settled = np.array([0.3, 0.35, 0.5], dtype=np.float32)
+        # Ausgekühlt = kühles Stahlblau. Der Heat-Trail läuft (für hellen Grund)
+        # tiefrot (heiß) → orange → gold → stahlblau (kalt). t=1 ist jeweils die
+        # heißere Bandkante, t=0 die kühlere – an den Bandgrenzen stetig.
+        settled = np.array([0.52, 0.64, 0.78], dtype=np.float32)
 
         m1 = heat >= 0.8
         if m1.any():
             t = (heat[m1] - 0.8) / 0.2
-            rgb[m1, 0] = 1.0
-            rgb[m1, 1] = 1.0
-            rgb[m1, 2] = 0.85 * t
+            rgb[m1, 0] = 0.92 - 0.12 * t
+            rgb[m1, 1] = 0.22 - 0.22 * t
+            rgb[m1, 2] = 0.05
             alpha[m1] = 1.0
 
         m2 = (heat >= 0.5) & ~m1
         if m2.any():
             t = (heat[m2] - 0.5) / 0.3
-            rgb[m2, 0] = 1.0
-            rgb[m2, 1] = 0.5 + 0.5 * t
-            rgb[m2, 2] = 0.0
+            rgb[m2, 0] = 0.98 - 0.06 * t
+            rgb[m2, 1] = 0.50 - 0.28 * t
+            rgb[m2, 2] = 0.05
             alpha[m2] = 1.0
 
         m3 = (heat >= 0.2) & ~m1 & ~m2
         if m3.any():
             t = (heat[m3] - 0.2) / 0.3
-            rgb[m3, 0] = 0.8 + 0.2 * t
-            rgb[m3, 1] = 0.5 * t
-            rgb[m3, 2] = 0.0
+            rgb[m3, 0] = 0.95 + 0.03 * t
+            rgb[m3, 1] = 0.75 - 0.25 * t
+            rgb[m3, 2] = 0.20 - 0.15 * t
             alpha[m3] = 0.9 + 0.1 * t
 
         m4 = ~m1 & ~m2 & ~m3
         if m4.any():
             t = heat[m4] / 0.2
-            rgb[m4, 0] = settled[0] + (0.8 - settled[0]) * t
-            rgb[m4, 1] = settled[1] * t
-            rgb[m4, 2] = settled[2] * (1.0 - t)
-            alpha[m4] = 0.6 + 0.3 * t
+            rgb[m4, 0] = settled[0] + (0.95 - settled[0]) * t
+            rgb[m4, 1] = settled[1] + (0.75 - settled[1]) * t
+            rgb[m4, 2] = settled[2] + (0.20 - settled[2]) * t
+            alpha[m4] = 0.55 + 0.35 * t
 
         colors[v_idx, :3] = rgb
         colors[v_idx, 3] = alpha
@@ -1419,8 +1424,48 @@ class MainWindow(QtWidgets.QMainWindow):
         super().closeEvent(event)
 
 
+def apply_light_theme(app: QtWidgets.QApplication) -> None:
+    """Erzwingt ein helles, konsistentes Erscheinungsbild – unabhängig davon, ob
+    das Betriebssystem im Dark-Mode läuft, damit die App (und die Doku-Screenshots)
+    überall gleich aussehen.
+
+    Wichtig: `style.standardPalette()` folgt ab Qt 6.5 dem OS-Farbschema und liefert
+    im System-Dark-Mode eine dunkle Palette. Deshalb setzen wir das Farbschema
+    explizit auf Hell und definieren eine vollständige helle Palette von Hand."""
+    app.setStyle("Fusion")
+    try:  # Qt 6.8+: Plattform-Farbschema explizit auf Hell zwingen
+        app.styleHints().setColorScheme(QtCore.Qt.ColorScheme.Light)
+    except (AttributeError, TypeError):
+        pass
+
+    Role = QtGui.QPalette.ColorRole
+    Group = QtGui.QPalette.ColorGroup
+    C = QtGui.QColor
+    white, window, text = C("#ffffff"), C("#f0f0f0"), C("#1a1a1a")
+    disabled = C("#9aa0a6")
+
+    pal = QtGui.QPalette()
+    pal.setColor(Role.Window, window)
+    pal.setColor(Role.WindowText, text)
+    pal.setColor(Role.Base, white)
+    pal.setColor(Role.AlternateBase, C("#f5f6f8"))
+    pal.setColor(Role.ToolTipBase, C("#ffffe1"))
+    pal.setColor(Role.ToolTipText, text)
+    pal.setColor(Role.Text, text)
+    pal.setColor(Role.Button, window)
+    pal.setColor(Role.ButtonText, text)
+    pal.setColor(Role.BrightText, C("#d00000"))
+    pal.setColor(Role.Link, C("#2a55c0"))
+    pal.setColor(Role.Highlight, C("#3a6ea5"))
+    pal.setColor(Role.HighlightedText, white)
+    for role in (Role.WindowText, Role.Text, Role.ButtonText):
+        pal.setColor(Group.Disabled, role, disabled)
+    app.setPalette(pal)
+
+
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
+    apply_light_theme(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

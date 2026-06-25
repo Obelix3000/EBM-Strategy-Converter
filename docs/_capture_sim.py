@@ -11,6 +11,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+import numpy as np  # noqa: E402
 from PySide6 import QtCore, QtWidgets  # noqa: E402
 
 import desktop_app  # noqa: E402
@@ -39,6 +40,7 @@ def wait_preview(win, timeout_ms: int = 20000) -> None:
 
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
+    desktop_app.apply_light_theme(app)  # gleiches helles Theme wie die echte App
     win = desktop_app.MainWindow()
     win.resize(1500, 950)
     win.show()
@@ -62,13 +64,11 @@ def main() -> None:
 
     # Kamera näher heranzoomen, damit die Hitze-Spur sichtbar wird.
     cam = win.preview_canvas.view.camera
-    cam.distance = 90
-    cam.center = (0.0, 0.0, 4.0)
-    process(300)
 
-    # Simulation: moderate Geschwindigkeit, lange Hitze-Spur.
+    # Simulation: moderate Geschwindigkeit, lange Hitze-Spur (gut sichtbarer
+    # warmer Verlauf rot→orange→gold vor den hell zurücktretenden Punkten).
     win.sim_speed_spin.setValue(25)
-    win.sim_decay_spin.setValue(140)
+    win.sim_decay_spin.setValue(300)
     win._start_simulation()
 
     # Warten bis Sim-Daten geladen sind und die Simulation läuft.
@@ -76,6 +76,17 @@ def main() -> None:
     while not win.sim_running and waited < 10000:
         process(100)
         waited += 100
+
+    # Kamera auf die aktive Schicht (einzelner Würfel) zentrieren und passend
+    # heranzoomen – die Würfel liegen abseits des Ursprungs, sonst erscheint die
+    # Schicht klein in der Plattenmitte.
+    if win.sim_points_xyz is not None and len(win.sim_points_xyz):
+        pts = win.sim_points_xyz
+        c = pts.mean(axis=0)
+        cam.center = (float(c[0]), float(c[1]), float(c[2]))
+        extent = float(np.ptp(pts[:, :2]))  # Spannweite in XY
+        cam.distance = max(extent * 2.0, 22.0)
+        process(300)
 
     # Bis ca. 50 % Fortschritt laufen lassen.
     if win.sim_points_xyz is not None:

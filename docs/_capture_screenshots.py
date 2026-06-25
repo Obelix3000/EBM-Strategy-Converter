@@ -59,6 +59,7 @@ def grab(widget, name: str) -> None:
 
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
+    desktop_app.apply_light_theme(app)  # gleiches helles Theme wie die echte App
     win = desktop_app.MainWindow()
     win.resize(1500, 950)
     win.show()
