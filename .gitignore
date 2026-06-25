@@ -10,6 +10,7 @@ __pycache__/
 
 # --- Virtuelle Environments ---
 .venv/
+.venv_doc/
 venv/
 env/
 ENV/
@@ -39,6 +40,9 @@ data/
 dist/
 build/
 
+# --- Build-/Laufzeit-Logs ---
+build_log.txt
+*.log
 
 20260408_5Cubes_0_Rotation/
 EBM-Strategy.exe
