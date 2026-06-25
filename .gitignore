@@ -26,6 +26,12 @@ desktop.ini
 *.swp
 *.swo
 
+# --- Claude Code (öffentliches Repo: nicht einchecken) ---
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+
 # --- B99-Maschinendaten und ZIP-Archive ---
 *.B99
 *.b99
